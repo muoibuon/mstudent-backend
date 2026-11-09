@@ -6,7 +6,8 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -18,8 +19,31 @@ from .pipeline import assistant, orchestrator, planner
 ROOT = Path(__file__).resolve().parent
 SAMPLE = ROOT.parent / "sample_data" / "messages.json"
 
+
+async def require_api_token(request: Request, authorization: str | None = Header(None)) -> None:
+    """Nếu đặt MSTUDENT_API_TOKEN thì mọi /api/* (trừ /api/health) cần `Authorization: Bearer <token>`.
+
+    Dùng khi deploy backend công khai cho app mobile. Để trống khi chạy local/demo.
+    """
+    expected = os.getenv("MSTUDENT_API_TOKEN")
+    if not expected or not request.url.path.startswith("/api/") or request.url.path == "/api/health":
+        return
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(401, "Thiếu hoặc sai API token")
+
+
 app = FastAPI(
-    title="MStudent", version="0.1.0", description="AI inbox biến thông báo email/LMS/Zalo thành việc cần làm"
+    title="MStudent",
+    version="0.2.0",
+    description="AI inbox biến thông báo email/LMS/Zalo thành việc cần làm",
+    dependencies=[Depends(require_api_token)],
+)
+# App mobile / web khác origin gọi API → cần CORS. Thu hẹp bằng MSTUDENT_CORS_ORIGINS="https://a.com,https://b.com".
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("MSTUDENT_CORS_ORIGINS", "*").split(",") if o.strip()],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

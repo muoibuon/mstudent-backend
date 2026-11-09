@@ -142,3 +142,11 @@ def test_agent_config_and_eval(client, monkeypatch):
     assert ok.status_code == 200
     ev = client.post("/api/eval").json()
     assert ev["mode"] == "offline" and ev["scores"]["relevant"]["pct"] == 100
+
+
+def test_api_token_guard(client, monkeypatch):
+    monkeypatch.setenv("MSTUDENT_API_TOKEN", "tok")
+    assert client.get("/api/health").status_code == 200  # health luôn mở để app kiểm tra kết nối
+    assert client.get("/api/tasks").status_code == 401
+    assert client.get("/api/tasks", headers={"Authorization": "Bearer tok"}).status_code == 200
+    assert client.get("/").status_code == 200  # UI web không bị chặn

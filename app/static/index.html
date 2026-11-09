@@ -181,9 +181,15 @@ function h(tag, attrs = {}, ...kids) {
   for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : String(k));
   return e;
 }
+let API_TOKEN = ''; try { API_TOKEN = localStorage.getItem('mstudent_token') || ''; } catch {}
 async function api(path, opts = {}) {
   const {headers, ...rest} = opts;
-  const r = await fetch(path, {...rest, headers: {'Content-Type': 'application/json', ...(headers || {})}});
+  const auth = API_TOKEN ? {Authorization: 'Bearer ' + API_TOKEN} : {};
+  const r = await fetch(path, {...rest, headers: {'Content-Type': 'application/json', ...auth, ...(headers || {})}});
+  if (r.status === 401) {
+    const t = prompt('Server yêu cầu API token (MSTUDENT_API_TOKEN):');
+    if (t) { API_TOKEN = t.trim(); try { localStorage.setItem('mstudent_token', API_TOKEN); } catch {} return api(path, opts); }
+  }
   if (!r.ok) {
     const d = (await r.json().catch(() => ({}))).detail;
     throw new Error(Array.isArray(d) ? d.map((x) => x.msg).join('; ') : d || r.statusText);
