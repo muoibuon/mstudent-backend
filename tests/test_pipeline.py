@@ -95,3 +95,50 @@ def test_digest_and_done(client):
     tid = client.get("/api/tasks").json()[0]["id"]
     assert client.post(f"/api/tasks/{tid}/done").json()["status"] == "done"
     assert all(t["id"] != tid for t in client.get("/api/tasks").json())
+
+
+def test_trace_recorded(client):
+    r = client.post(
+        "/api/ingest", json={"source": "zalo", "body": "Nộp bài tập trước 23h59 ngày 20/11"}
+    ).json()
+    assert [s["agent"] for s in r["trace"]] == ["Triage", "Extractor", "Planner"]
+    traces = client.get("/api/traces").json()
+    assert traces[0]["message_id"] == r["message_id"] and traces[0]["mode"] == "offline"
+
+
+def test_chat_offline_tools(client):
+    client.post("/api/demo/seed")
+    r = client.post("/api/chat", json={"message": "Tuần này có gì?"}).json()
+    assert r["tool_calls"][0]["tool"] == "list_tasks" and "#" in r["reply"]
+    r = client.post("/api/chat", json={"message": "thêm: thứ 6 tuần sau nộp đồ án OOP"}).json()
+    assert r["tool_calls"][0]["tool"] == "add_notice" and "Đã tạo" in r["reply"]
+    tid = client.get("/api/tasks").json()[0]["id"]
+    r = client.post("/api/chat", json={"message": f"xong {tid}"}).json()
+    assert r["tool_calls"][0]["tool"] == "complete_task"
+    assert all(t["id"] != tid for t in client.get("/api/tasks").json())
+    assert (
+        client.post("/api/chat", json={"message": "bản tin"}).json()["tool_calls"][0]["tool"] == "get_digest"
+    )
+    assert "Mình có thể" in client.post("/api/chat", json={"message": "chào"}).json()["reply"]
+
+
+def test_patch_task_moves_due(client):
+    client.post("/api/demo/seed")
+    t = client.get("/api/tasks").json()[0]
+    new = "2026-11-25" + t["due_at"][10:]
+    assert client.patch(f"/api/tasks/{t['id']}", json={"due_at": new}).json()["due_at"] == new
+    assert client.patch("/api/tasks/9999", json={"status": "done"}).status_code == 404
+
+
+def test_agent_config_and_eval(client, monkeypatch):
+    cfg = client.get("/api/agents/config").json()
+    assert cfg["llm"] is False and "triage_prompt" in cfg["config"]
+    saved = client.put("/api/agents/config", json={"model": "gpt-test", "unknown": "x"}).json()["config"]
+    assert saved["model"] == "gpt-test" and "unknown" not in saved
+    assert client.post("/api/agents/config/reset").json()["config"]["model"] == cfg["defaults"]["model"]
+    monkeypatch.setenv("MSTUDENT_ADMIN_TOKEN", "s3cret")
+    assert client.put("/api/agents/config", json={"model": "x"}).status_code == 403
+    ok = client.put("/api/agents/config", json={"model": "x"}, headers={"X-Admin-Token": "s3cret"})
+    assert ok.status_code == 200
+    ev = client.post("/api/eval").json()
+    assert ev["mode"] == "offline" and ev["scores"]["relevant"]["pct"] == 100

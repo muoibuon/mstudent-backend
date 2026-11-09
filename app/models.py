@@ -89,3 +89,26 @@ class IngestResult(BaseModel):
     created: list[Task] = []
     updated: list[Task] = []
     mode: str = Field(description="'llm' hoặc 'offline'")
+    trace: list[dict] = []
+
+
+class ChatTurn(BaseModel):
+    role: str = Field(description="'user' hoặc 'assistant'")
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatTurn] = []
+
+
+class ToolCall(BaseModel):
+    tool: str
+    args: dict = {}
+    result: str = ""
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    mode: str
+    tool_calls: list[ToolCall] = []

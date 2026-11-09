@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority TEXT, source TEXT, message_id TEXT, status TEXT DEFAULT 'open',
     reminders TEXT DEFAULT '[]', updated_from TEXT DEFAULT '[]'
 );
+CREATE TABLE IF NOT EXISTS traces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT, created_at TEXT, mode TEXT, summary TEXT, steps TEXT
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
@@ -40,6 +45,8 @@ def reset() -> None:
     with connect() as c:
         c.execute("DELETE FROM tasks")
         c.execute("DELETE FROM messages")
+        c.execute("DELETE FROM traces")
+        c.execute("DELETE FROM sqlite_sequence WHERE name IN ('tasks', 'traces')")  # id đếm lại từ 1
 
 
 def save_message(msg: Message, relevant: bool, category: Category, reason: str) -> None:
@@ -127,3 +134,55 @@ def list_tasks(status: str | None = "open") -> list[Task]:
 
 def set_status(task_id: int, status: str) -> Task:
     return update_task(task_id, {"status": status})
+
+
+def get_task(task_id: int) -> Task | None:
+    with connect() as c:
+        r = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        return _row_to_task(r) if r else None
+
+
+# ---- Trace từng bước agent ----
+
+
+def save_trace(message_id: str, created_at: str, mode: str, summary: str, steps: list[dict]) -> int:
+    with connect() as c:
+        cur = c.execute(
+            "INSERT INTO traces (message_id, created_at, mode, summary, steps) VALUES (?,?,?,?,?)",
+            (message_id, created_at, mode, summary, json.dumps(steps, ensure_ascii=False)),
+        )
+        return cur.lastrowid
+
+
+def list_traces(limit: int = 30) -> list[dict]:
+    with connect() as c:
+        rows = c.execute("SELECT * FROM traces ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "message_id": r["message_id"],
+            "created_at": r["created_at"],
+            "mode": r["mode"],
+            "summary": r["summary"],
+            "steps": json.loads(r["steps"]),
+        }
+        for r in rows
+    ]
+
+
+# ---- Cấu hình agent ----
+
+
+def get_settings() -> dict[str, str]:
+    with connect() as c:
+        return {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings")}
+
+
+def save_settings(values: dict[str, str]) -> None:
+    with connect() as c:
+        c.executemany("INSERT OR REPLACE INTO settings VALUES (?,?)", list(values.items()))
+
+
+def clear_settings() -> None:
+    with connect() as c:
+        c.execute("DELETE FROM settings")

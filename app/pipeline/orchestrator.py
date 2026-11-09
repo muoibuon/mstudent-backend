@@ -1,12 +1,14 @@
 """Orchestrator: Message → Triage → Extractor → Planner → Store.
 
 Chế độ 'llm' dùng OpenAI Agents SDK; nếu lỗi hoặc không có key thì tự rơi về 'offline' (luật).
+Mỗi lần chạy ghi lại trace từng bước để UI hiển thị.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -23,33 +25,71 @@ def _msg_id(msg: Message) -> str:
     return msg.id or hashlib.sha1(raw.encode()).hexdigest()[:12]
 
 
+class Tracer:
+    """Ghi lại input/output/thời gian của từng agent."""
+
+    def __init__(self) -> None:
+        self.steps: list[dict] = []
+
+    def add(self, agent: str, kind: str, started: float, output=None, error: str | None = None) -> None:
+        step = {"agent": agent, "kind": kind, "ms": round((time.perf_counter() - started) * 1000, 1)}
+        if output is not None:
+            step["output"] = output.model_dump(mode="json") if hasattr(output, "model_dump") else output
+        if error:
+            step["error"] = error
+        self.steps.append(step)
+
+
 async def ingest(msg: Message) -> IngestResult:
     msg = msg.model_copy(
         update={"id": _msg_id(msg), "received_at": msg.received_at or config.now().isoformat()}
     )
+    tr = Tracer()
     mode = "offline"
     tri = ext = None
     if config.llm_enabled():
-        try:
-            from . import llm_agents
+        from . import llm_agents
 
+        t0 = time.perf_counter()
+        try:
             tri = await llm_agents.llm_triage(msg)
+            tr.add("Triage", "llm", t0, tri)
             if tri.relevant:
+                t0 = time.perf_counter()
                 ext = await llm_agents.llm_extract(msg)
+                tr.add("Extractor", "llm", t0, ext)
             mode = "llm"
         except Exception as e:  # mạng/credit/model lỗi → không làm hỏng demo
             log.warning("LLM lỗi, chuyển sang offline: %s", e)
+            tr.add("LLM", "llm", t0, error=f"{type(e).__name__}: {e} → chuyển sang luật")
             tri = ext = None
     if tri is None:
+        t0 = time.perf_counter()
         tri = rules.triage(msg)
-        ext = rules.extract(msg, tri.category) if tri.relevant else None
+        tr.add("Triage", "rules", t0, tri)
+        if tri.relevant:
+            t0 = time.perf_counter()
+            ext = rules.extract(msg, tri.category)
+            tr.add("Extractor", "rules", t0, ext)
 
     store.save_message(msg, tri.relevant, tri.category, tri.reason)
     created: list[Task] = []
     updated: list[Task] = []
     if tri.relevant and ext and ext.tasks:
+        t0 = time.perf_counter()
         ref = datetime.fromisoformat(msg.received_at)
         created, updated = planner.plan(ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref)
+        tr.add(
+            "Planner",
+            "python",
+            t0,
+            {
+                "created": [{"id": t.id, "title": t.title, "priority": t.priority.value} for t in created],
+                "updated": [{"id": t.id, "title": t.title, "due_at": t.due_at} for t in updated],
+            },
+        )
+    summary = (msg.subject or msg.body).strip().replace("\n", " ")[:90]
+    store.save_trace(msg.id, config.now().isoformat(), mode, f"[{msg.source.value}] {summary}", tr.steps)
     return IngestResult(
         message_id=msg.id,
         relevant=tri.relevant,
@@ -58,6 +98,7 @@ async def ingest(msg: Message) -> IngestResult:
         created=created,
         updated=updated,
         mode=mode,
+        trace=tr.steps,
     )
 
 

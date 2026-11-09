@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import config, store
+from . import agent_config, config, evaluation, store
 from .connectors import lms_ics, zalo
-from .models import IngestResult, Message, Task
-from .pipeline import orchestrator, planner
+from .models import ChatRequest, ChatResponse, IngestResult, Message, Task
+from .pipeline import assistant, orchestrator, planner
 
 ROOT = Path(__file__).resolve().parent
 SAMPLE = ROOT.parent / "sample_data" / "messages.json"
@@ -31,6 +32,19 @@ class IcsUrl(BaseModel):
     url: str
 
 
+class TaskPatch(BaseModel):
+    title: str | None = None
+    due_at: str | None = None
+    status: str | None = None
+
+
+def _check_admin(token: str | None) -> None:
+    """Nếu đặt MSTUDENT_ADMIN_TOKEN thì chỉ ai có token mới được sửa cấu hình agent."""
+    expected = os.getenv("MSTUDENT_ADMIN_TOKEN")
+    if expected and token != expected:
+        raise HTTPException(403, "Sai admin token")
+
+
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(ROOT / "static" / "index.html")
@@ -38,7 +52,12 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "mode": "llm" if config.llm_enabled() else "offline", "model": config.OPENAI_MODEL}
+    return {
+        "ok": True,
+        "mode": "llm" if config.llm_enabled() else "offline",
+        "model": agent_config.get()["model"],
+        "now": config.now().isoformat(),
+    }
 
 
 @app.post("/api/ingest", response_model=IngestResult)
@@ -67,7 +86,51 @@ def tasks(status: str | None = "open"):
 
 @app.post("/api/tasks/{task_id}/done", response_model=Task)
 def done(task_id: int):
+    if store.get_task(task_id) is None:
+        raise HTTPException(404, "Không có việc này")
     return store.set_status(task_id, "done")
+
+
+@app.patch("/api/tasks/{task_id}", response_model=Task)
+def patch_task(task_id: int, p: TaskPatch):
+    if store.get_task(task_id) is None:
+        raise HTTPException(404, "Không có việc này")
+    fields = p.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(400, "Không có gì để cập nhật")
+    return planner.live([store.update_task(task_id, fields)], config.now())[0]
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    return await assistant.chat(req.message, req.history)
+
+
+@app.get("/api/traces")
+def traces(limit: int = 30):
+    return store.list_traces(limit)
+
+
+@app.get("/api/agents/config")
+def get_agent_config():
+    return {"config": agent_config.get(), "defaults": agent_config.DEFAULTS, "llm": config.llm_enabled()}
+
+
+@app.put("/api/agents/config")
+def put_agent_config(values: dict[str, str], x_admin_token: str | None = Header(None)):
+    _check_admin(x_admin_token)
+    return {"config": agent_config.save(values)}
+
+
+@app.post("/api/agents/config/reset")
+def reset_agent_config(x_admin_token: str | None = Header(None)):
+    _check_admin(x_admin_token)
+    return {"config": agent_config.reset()}
+
+
+@app.post("/api/eval")
+async def run_eval():
+    return await evaluation.evaluate()
 
 
 @app.get("/api/digest")
