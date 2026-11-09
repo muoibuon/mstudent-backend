@@ -1,0 +1,74 @@
+[
+  {
+    "id": "demo-01",
+    "source": "lms",
+    "sender": "Moodle VJU",
+    "subject": "[CSE3032] Nộp báo cáo Lab 3 – MIPS pipeline",
+    "body": "Các em nộp báo cáo Lab 3 lên Moodle trước 23h59 ngày 13/11. Nộp muộn trừ 20% điểm.",
+    "received_at": "2026-11-10T08:05:00+07:00"
+  },
+  {
+    "id": "demo-02",
+    "source": "email",
+    "sender": "Phòng Đào tạo VJU <daotao@vju.ac.vn>",
+    "subject": "Lịch thi cuối kỳ học phần Giải tích 2",
+    "body": "Thông báo: Thi cuối kỳ Giải tích 2 (MAT1042) vào 8h00 ngày 28/11/2026 tại phòng 301 nhà A. Sinh viên mang thẻ SV.",
+    "received_at": "2026-11-10T09:12:00+07:00"
+  },
+  {
+    "id": "demo-03",
+    "source": "zalo",
+    "sender": "Lớp trưởng (BCSE K2025)",
+    "subject": "",
+    "body": "Mọi người ơi, thứ 5 tuần này nghỉ học môn Cơ học kỹ thuật, học bù vào 13h30 thứ 7 tuần sau, phòng 205 nha.",
+    "received_at": "2026-11-10T10:30:00+07:00"
+  },
+  {
+    "id": "demo-04",
+    "source": "email",
+    "sender": "Shopee <no-reply@shopee.vn>",
+    "subject": "Flash sale 11.11 – giảm giá đến 50%",
+    "body": "Săn voucher khuyến mãi ngay hôm nay!",
+    "received_at": "2026-11-10T11:00:00+07:00"
+  },
+  {
+    "id": "demo-05",
+    "source": "email",
+    "sender": "Đoàn Thanh niên VJU",
+    "subject": "Đăng ký tham gia cuộc thi Codex Community Hackathon",
+    "body": "Hạn đăng ký đội thi: 17h ngày 20/11. Mỗi đội 2–4 sinh viên. Link đăng ký trên fanpage.",
+    "received_at": "2026-11-10T13:20:00+07:00"
+  },
+  {
+    "id": "demo-06",
+    "source": "zalo",
+    "sender": "Cô Hoàng Anh (Mô phỏng Toán)",
+    "subject": "",
+    "body": "Bài tập tuần 9 (mô hình Lanchester) các em nộp trước thứ 6 tuần này nhé.",
+    "received_at": "2026-11-10T15:45:00+07:00"
+  },
+  {
+    "id": "demo-07",
+    "source": "email",
+    "sender": "Phòng Kế hoạch Tài chính",
+    "subject": "Nhắc đóng học phí học kỳ 1",
+    "body": "Sinh viên hoàn thành đóng học phí trước ngày 30/11/2026 qua cổng thanh toán của trường.",
+    "received_at": "2026-11-10T16:00:00+07:00"
+  },
+  {
+    "id": "demo-08",
+    "source": "lms",
+    "sender": "Moodle VJU",
+    "subject": "[CSE3032] Gia hạn nộp báo cáo Lab 3 – MIPS pipeline",
+    "body": "Thầy gia hạn nộp báo cáo Lab 3 đến 23h59 ngày 15/11.",
+    "received_at": "2026-11-11T07:30:00+07:00"
+  },
+  {
+    "id": "demo-09",
+    "source": "zalo",
+    "sender": "Bạn cùng lớp (BCSE K2025)",
+    "subject": "",
+    "body": "Có ai đi ăn trưa không 😋",
+    "received_at": "2026-11-11T11:10:00+07:00"
+  }
+]
