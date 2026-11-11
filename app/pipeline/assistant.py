@@ -1,7 +1,9 @@
-"""Trợ lý chat: agent có tool, điều khiển toàn bộ hệ thống bằng ngôn ngữ tự nhiên.
+"""Trợ lý chat: agent có tool, điều khiển dữ liệu CỦA CHÍNH người dùng bằng ngôn ngữ tự nhiên.
 
 - Chế độ LLM: OpenAI Agents SDK, agent tự chọn tool (list_tasks, add_notice, complete_task, get_digest).
 - Chế độ offline: bộ định tuyến ý định bằng luật gọi đúng các tool đó.
+
+`user_id` được gắn sẵn vào tool ở phía server; model không thể truyền hay đổi nó.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import re
 import unicodedata
 from datetime import datetime
 
-from .. import config, store
+from .. import config, repo
 from ..models import Category, ChatResponse, ChatTurn, Message, Priority, Source, ToolCall
 from . import orchestrator, planner, rules
 
@@ -27,9 +29,9 @@ def _fmt_task(t) -> str:
     return f"{mark}#{t.id} · {when} — {t.title}"
 
 
-def tool_list_tasks(days: int | None = 7, category: str | None = None) -> str:
+def tool_list_tasks(user_id: int, days: int | None = 7, category: str | None = None) -> str:
     ref = config.now()
-    tasks = planner.live(store.list_tasks("open"), ref)
+    tasks = planner.live(repo.list_tasks(user_id, "open"), ref)
     if category:
         tasks = [t for t in tasks if t.category.value == category]
     if days:
@@ -40,33 +42,38 @@ def tool_list_tasks(days: int | None = 7, category: str | None = None) -> str:
         ]
     if not tasks:
         return "Không có việc nào phù hợp."
-    return "\n".join(_fmt_task(t) for t in tasks)
+    return "\n".join(_fmt_task(t) for t in tasks[:40])
 
 
-async def tool_add_notice(text: str) -> str:
-    r = await orchestrator.ingest(Message(source=Source.manual, body=text))
+async def tool_add_notice(user_id: int, text: str) -> str:
+    text = text.strip()[:8000]
+    if not text:
+        return "Thông báo trống."
+    r = await orchestrator.ingest(user_id, Message(source=Source.manual, body=text))
+    if r.duplicate:
+        return "Thông báo này đã được ghi nhận trước đó."
     if not r.relevant:
         return f"Không tạo việc: {r.reason}"
     parts = [f"Đã tạo {_fmt_task(t)}" for t in r.created] + [f"Đã cập nhật {_fmt_task(t)}" for t in r.updated]
     return "\n".join(parts) or "Thông báo hợp lệ nhưng không tách được việc nào."
 
 
-def tool_complete_task(task_id: int) -> str:
-    t = store.get_task(task_id)
+def tool_complete_task(user_id: int, task_id: int) -> str:
+    t = repo.get_task(user_id, task_id)
     if t is None:
         return f"Không tìm thấy việc #{task_id}."
-    store.set_status(task_id, "done")
+    repo.set_status(user_id, task_id, "done")
     return f"Đã đánh dấu xong #{task_id} — {t.title}"
 
 
-async def tool_get_digest() -> str:
-    return (await orchestrator.digest())["text"]
+async def tool_get_digest(user_id: int) -> str:
+    return (await orchestrator.digest(user_id))["text"]
 
 
 # ---------------- Chế độ LLM ----------------
 
 
-async def _llm_chat(message: str, history: list[ChatTurn]) -> ChatResponse:
+async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
     from agents import Agent, Runner, function_tool
     from agents.items import ToolCallItem, ToolCallOutputItem
 
@@ -80,7 +87,7 @@ async def _llm_chat(message: str, history: list[ChatTurn]) -> ChatResponse:
             days: chỉ lấy việc có hạn trong N ngày tới (null = tất cả).
             category: deadline | exam | class_change | event | admin | other (null = tất cả).
         """
-        return tool_list_tasks(days, category)
+        return tool_list_tasks(user_id, days, category)
 
     @function_tool
     async def add_notice(text: str) -> str:
@@ -89,7 +96,7 @@ async def _llm_chat(message: str, history: list[ChatTurn]) -> ChatResponse:
         Args:
             text: nguyên văn thông báo.
         """
-        return await tool_add_notice(text)
+        return await tool_add_notice(user_id, text)
 
     @function_tool
     def complete_task(task_id: int) -> str:
@@ -98,17 +105,17 @@ async def _llm_chat(message: str, history: list[ChatTurn]) -> ChatResponse:
         Args:
             task_id: id của việc (số sau dấu #).
         """
-        return tool_complete_task(task_id)
+        return tool_complete_task(user_id, task_id)
 
     @function_tool
     async def get_digest() -> str:
         """Lấy bản tin tóm tắt các việc trong 7 ngày tới."""
-        return await tool_get_digest()
+        return await tool_get_digest(user_id)
 
     cfg = agent_config.get()
     agent = Agent(
         name="MStudent Assistant",
-        instructions=f"{cfg['assistant_prompt']}\nBây giờ là {config.now().isoformat()}.",
+        instructions=f"{cfg['assistant_prompt']}{agent_config.GUARD}\nBây giờ là {config.now().isoformat()}.",
         tools=[list_tasks, add_notice, complete_task, get_digest],
         model=cfg["model"],
     )
@@ -146,16 +153,18 @@ def _n(s: str) -> str:
     return unicodedata.normalize("NFC", s).lower().strip()
 
 
-async def _offline_chat(message: str) -> ChatResponse:
+async def _offline_chat(user_id: int, message: str) -> ChatResponse:
     t = _n(message)
     calls: list[ToolCall] = []
 
     async def call(name: str, fn, **kw):
-        out = await fn(**kw) if name in ("add_notice", "get_digest") else fn(**kw)
+        out = fn(user_id, **kw)
+        if hasattr(out, "__await__"):
+            out = await out
         calls.append(ToolCall(tool=name, args=kw, result=out))
         return out
 
-    if m := re.search(r"(?:xong|hoàn thành|done|đã làm)\D{0,12}#?(\d+)", t):
+    if m := re.search(r"(?:xong|hoàn thành|done|đã làm)\D{0,12}#?(\d{1,9})", t):
         reply = await call("complete_task", tool_complete_task, task_id=int(m.group(1)))
     elif any(k in t for k in ("bản tin", "tóm tắt", "digest", "tổng quan")):
         reply = await call("get_digest", tool_get_digest)
@@ -184,10 +193,10 @@ async def _offline_chat(message: str) -> ChatResponse:
     return ChatResponse(reply=reply, mode="offline", tool_calls=calls)
 
 
-async def chat(message: str, history: list[ChatTurn]) -> ChatResponse:
+async def chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
     if config.llm_enabled():
         try:
-            return await _llm_chat(message, history)
+            return await _llm_chat(user_id, message, history)
         except Exception as e:
             log.warning("Chat LLM lỗi, chuyển offline: %s", e)
-    return await _offline_chat(message)
+    return await _offline_chat(user_id, message)

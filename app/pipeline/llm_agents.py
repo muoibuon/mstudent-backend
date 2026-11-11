@@ -17,14 +17,28 @@ from ..models import ExtractionOut, Message, Task, TriageOut
 
 def _agent(name: str, prompt_key: str, output_type=None) -> Agent:
     cfg = agent_config.get()
-    return Agent(name=name, instructions=cfg[prompt_key], output_type=output_type, model=cfg["model"])
+    return Agent(
+        name=name,
+        instructions=cfg[prompt_key] + agent_config.GUARD,
+        output_type=output_type,
+        model=cfg["model"],
+    )
+
+
+def _clean(text: str) -> str:
+    """Không cho nội dung thông báo tự đóng thẻ dữ liệu."""
+    return text.replace("</thong_bao>", "</thong_bao_>").replace("<thong_bao>", "<thong_bao_>")
 
 
 def render(msg: Message) -> str:
     return (
         f"Thời điểm nhận: {msg.received_at or now().isoformat()}\n"
-        f"Nguồn: {msg.source.value}\nNgười gửi: {msg.sender}\n"
-        f"Tiêu đề: {msg.subject}\n---\n{msg.body}"
+        f"Nguồn: {msg.source.value}\n"
+        "<thong_bao>\n"
+        f"Người gửi: {_clean(msg.sender)}\n"
+        f"Tiêu đề: {_clean(msg.subject)}\n"
+        f"---\n{_clean(msg.body)}\n"
+        "</thong_bao>"
     )
 
 

@@ -58,6 +58,20 @@ def parse_ics(text: str) -> list[Message]:
     return msgs
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Không đi theo chuyển hướng (tránh bị dẫn sang địa chỉ nội bộ sau khi đã kiểm tra URL)."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+MAX_ICS_BYTES = 2 * 1024 * 1024
+
+
 def fetch(url: str) -> list[Message]:
-    with urllib.request.urlopen(url, timeout=15) as r:  # noqa: S310 (URL do người dùng cung cấp)
-        return parse_ics(r.read().decode("utf-8", "replace"))
+    opener = urllib.request.build_opener(_NoRedirect)
+    with opener.open(url, timeout=15) as r:
+        data = r.read(MAX_ICS_BYTES + 1)
+    if len(data) > MAX_ICS_BYTES:
+        raise ValueError("File lịch quá lớn")
+    return parse_ics(data.decode("utf-8", "replace"))

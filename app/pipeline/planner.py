@@ -1,11 +1,11 @@
-"""Planner agent (thuần Python): ưu tiên, nhắc việc, gộp trùng."""
+"""Planner agent (thuần Python): ưu tiên, nhắc việc, gộp trùng — theo từng người dùng."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-from .. import store
+from .. import repo
 from ..config import TZ
 from ..models import Category, Priority, Task, TaskOut
 
@@ -13,8 +13,33 @@ from ..models import Category, Priority, Task, TaskOut
 def _dt(s: str | None) -> datetime | None:
     if not s:
         return None
-    d = datetime.fromisoformat(s)
+    try:
+        d = datetime.fromisoformat(s)
+    except ValueError:
+        return None
     return d if d.tzinfo else d.replace(tzinfo=TZ)
+
+
+def sanitize(drafts: list[TaskOut], max_tasks: int = 5) -> list[TaskOut]:
+    """Kiểm tra đầu ra của LLM trước khi ghi CSDL: cắt độ dài, bỏ ngày sai định dạng, giới hạn số việc."""
+    out: list[TaskOut] = []
+    for d in drafts[:max_tasks]:
+        title = " ".join((d.title or "").split())[:120]
+        if not title:
+            continue
+        due = _dt(d.due_at)
+        out.append(
+            d.model_copy(
+                update={
+                    "title": title,
+                    "due_at": due.isoformat() if due else None,
+                    "course": (d.course or None) and d.course.strip()[:60],
+                    "location": (d.location or None) and d.location.strip()[:120],
+                    "action": (d.action or None) and d.action.strip()[:200],
+                }
+            )
+        )
+    return out
 
 
 def priority(task: TaskOut | Task, ref: datetime) -> Priority:
@@ -49,12 +74,12 @@ def _similar(a: Task, b: TaskOut) -> bool:
 
 
 def plan(
-    drafts: list[TaskOut], *, source: str, message_id: str, ref: datetime
+    user_id: int, drafts: list[TaskOut], *, source: str, message_id: str, ref: datetime
 ) -> tuple[list[Task], list[Task]]:
     """Trả về (task mới, task được cập nhật)."""
     created, updated = [], []
-    existing = store.list_tasks("open")
-    for d in drafts:
+    existing = repo.list_tasks(user_id, "open")
+    for d in sanitize(drafts):
         match = next((t for t in existing if _similar(t, d)), None)
         fields = {
             "title": d.title,
@@ -70,9 +95,11 @@ def plan(
             # Tin mới hơn ghi đè giờ/địa điểm (vd. "dời hạn nộp"), giữ lại trường cũ nếu tin mới thiếu.
             merged = {k: v for k, v in fields.items() if v not in (None, [], "") and k != "title"}
             merged["updated_from"] = match.updated_from + [message_id]
-            updated.append(store.update_task(match.id, merged))
+            task = repo.update_task(user_id, match.id, merged)
+            if task:
+                updated.append(task)
         else:
-            created.append(store.insert_task({**fields, "source": source, "message_id": message_id}))
+            created.append(repo.insert_task(user_id, {**fields, "source": source, "message_id": message_id}))
     return created, updated
 
 

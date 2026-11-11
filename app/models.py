@@ -1,10 +1,11 @@
-"""Kiểu dữ liệu dùng chung cho API, pipeline và LLM."""
+"""Kiểu dữ liệu dùng chung cho API, pipeline và LLM. Mọi đầu vào từ client đều có giới hạn độ dài."""
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Source(str, Enum):
@@ -32,12 +33,12 @@ class Priority(str, Enum):
 class Message(BaseModel):
     """Một thông báo thô từ email / LMS / Zalo."""
 
-    id: str | None = None
+    id: str | None = Field(None, max_length=200)
     source: Source = Source.manual
-    sender: str = ""
-    subject: str = ""
-    body: str
-    received_at: str | None = Field(None, description="ISO 8601; để trống = bây giờ")
+    sender: str = Field("", max_length=300)
+    subject: str = Field("", max_length=500)
+    body: str = Field(min_length=1, max_length=8000)
+    received_at: str | None = Field(None, max_length=40, description="ISO 8601; để trống = bây giờ")
 
 
 # ---- Schema cho LLM: mọi trường đều bắt buộc (strict JSON schema) ----
@@ -81,6 +82,12 @@ class Task(BaseModel):
     updated_from: list[str] = []
 
 
+class TaskPatch(BaseModel):
+    title: str | None = Field(None, min_length=1, max_length=200)
+    due_at: str | None = Field(None, max_length=40)
+    status: str | None = Field(None, pattern="^(open|done)$")
+
+
 class IngestResult(BaseModel):
     message_id: str
     relevant: bool
@@ -90,16 +97,17 @@ class IngestResult(BaseModel):
     updated: list[Task] = []
     mode: str = Field(description="'llm' hoặc 'offline'")
     trace: list[dict] = []
+    duplicate: bool = Field(False, description="Tin này đã được xử lý trước đó, không chạy lại agent")
 
 
 class ChatTurn(BaseModel):
-    role: str = Field(description="'user' hoặc 'assistant'")
-    content: str
+    role: str = Field(pattern="^(user|assistant)$")
+    content: str = Field(max_length=6000)
 
 
 class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatTurn] = []
+    message: str = Field(min_length=1, max_length=4000)
+    history: list[ChatTurn] = Field(default_factory=list, max_length=30)
 
 
 class ToolCall(BaseModel):
@@ -112,3 +120,81 @@ class ChatResponse(BaseModel):
     reply: str
     mode: str
     tool_calls: list[ToolCall] = []
+
+
+class ZaloPaste(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    group: str = Field("Nhóm lớp", max_length=100)
+
+
+class IcsUrl(BaseModel):
+    url: str = Field(max_length=2000)
+
+
+# ---- Tài khoản ----
+
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,}$")
+
+
+class Credentials(BaseModel):
+    email: str = Field(max_length=320)
+    password: str = Field(min_length=1, max_length=128)
+    device: str = Field("", max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not EMAIL_RE.match(v):
+            raise ValueError("Email không hợp lệ")
+        return v
+
+
+class RegisterRequest(Credentials):
+    name: str = Field("", max_length=100)
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=5000)
+    server_auth_code: str | None = Field(None, max_length=2000)
+    device: str = Field("", max_length=100)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=20, max_length=200)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field("", max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm_email: str = Field(max_length=320)
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    name: str
+    is_admin: bool
+    has_password: bool
+    google_linked: bool
+    gmail_connected: bool
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserOut
+
+
+class GoogleConnectRequest(BaseModel):
+    server_auth_code: str = Field(min_length=4, max_length=2000)
+
+
+class GmailSyncRequest(BaseModel):
+    days: int = Field(7, ge=1, le=30)
+    max_messages: int = Field(15, ge=1, le=30)

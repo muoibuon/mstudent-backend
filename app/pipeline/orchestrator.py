@@ -1,4 +1,4 @@
-"""Orchestrator: Message → Triage → Extractor → Planner → Store.
+"""Orchestrator: Message → Triage → Extractor → Planner → Store, theo từng người dùng.
 
 Chế độ 'llm' dùng OpenAI Agents SDK; nếu lỗi hoặc không có key thì tự rơi về 'offline' (luật).
 Mỗi lần chạy ghi lại trace từng bước để UI hiển thị.
@@ -12,8 +12,8 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from .. import config, store
-from ..models import IngestResult, Message, Priority, Task
+from .. import config, repo
+from ..models import Category, IngestResult, Message, Priority, Source, Task
 from . import planner, rules
 
 log = logging.getLogger("mstudent")
@@ -21,12 +21,15 @@ WEEKDAY_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", 
 
 
 def _msg_id(msg: Message) -> str:
-    raw = f"{msg.source.value}|{msg.sender}|{msg.subject}|{msg.body}"
-    return msg.id or hashlib.sha1(raw.encode()).hexdigest()[:12]
+    if msg.id:
+        return msg.id
+    # Cùng nội dung nhưng khác ngày nhận là tin khác ("mai kiểm tra" hôm nay ≠ tuần sau).
+    raw = f"{msg.source.value}|{msg.sender}|{msg.subject}|{msg.body}|{(msg.received_at or '')[:10]}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 class Tracer:
-    """Ghi lại input/output/thời gian của từng agent."""
+    """Ghi lại output/thời gian của từng agent."""
 
     def __init__(self) -> None:
         self.steps: list[dict] = []
@@ -40,10 +43,26 @@ class Tracer:
         self.steps.append(step)
 
 
-async def ingest(msg: Message) -> IngestResult:
-    msg = msg.model_copy(
-        update={"id": _msg_id(msg), "received_at": msg.received_at or config.now().isoformat()}
-    )
+def _short_error(e: Exception) -> str:
+    return f"{type(e).__name__}: {str(e)[:160]}"
+
+
+async def ingest(user_id: int, msg: Message) -> IngestResult:
+    received = msg.received_at or config.now().isoformat()
+    msg = msg.model_copy(update={"received_at": received})
+    msg = msg.model_copy(update={"id": _msg_id(msg)})
+
+    seen = repo.get_message(user_id, msg.id)
+    if seen:  # đã xử lý → không gọi lại LLM (tiết kiệm chi phí khi quét hộp thư nhiều lần)
+        return IngestResult(
+            message_id=msg.id,
+            relevant=bool(seen["relevant"]),
+            category=Category(seen["category"]),
+            reason="Tin này đã được xử lý trước đó",
+            mode="cache",
+            duplicate=True,
+        )
+
     tr = Tracer()
     mode = "offline"
     tri = ext = None
@@ -59,9 +78,9 @@ async def ingest(msg: Message) -> IngestResult:
                 ext = await llm_agents.llm_extract(msg)
                 tr.add("Extractor", "llm", t0, ext)
             mode = "llm"
-        except Exception as e:  # mạng/credit/model lỗi → không làm hỏng demo
+        except Exception as e:  # mạng/credit/model lỗi → không làm hỏng luồng
             log.warning("LLM lỗi, chuyển sang offline: %s", e)
-            tr.add("LLM", "llm", t0, error=f"{type(e).__name__}: {e} → chuyển sang luật")
+            tr.add("LLM", "llm", t0, error=f"{_short_error(e)} → chuyển sang luật")
             tri = ext = None
     if tri is None:
         t0 = time.perf_counter()
@@ -72,13 +91,20 @@ async def ingest(msg: Message) -> IngestResult:
             ext = rules.extract(msg, tri.category)
             tr.add("Extractor", "rules", t0, ext)
 
-    store.save_message(msg, tri.relevant, tri.category, tri.reason)
+    repo.save_message(user_id, msg, tri.relevant, tri.category, tri.reason[:300])
     created: list[Task] = []
     updated: list[Task] = []
     if tri.relevant and ext and ext.tasks:
         t0 = time.perf_counter()
-        ref = datetime.fromisoformat(msg.received_at)
-        created, updated = planner.plan(ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref)
+        try:
+            ref = datetime.fromisoformat(received)
+        except ValueError:
+            ref = config.now()
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=config.TZ)
+        created, updated = planner.plan(
+            user_id, ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref
+        )
         tr.add(
             "Planner",
             "python",
@@ -89,7 +115,7 @@ async def ingest(msg: Message) -> IngestResult:
             },
         )
     summary = (msg.subject or msg.body).strip().replace("\n", " ")[:90]
-    store.save_trace(msg.id, config.now().isoformat(), mode, f"[{msg.source.value}] {summary}", tr.steps)
+    repo.save_trace(user_id, msg.id, mode, f"[{msg.source.value}] {summary}", tr.steps)
     return IngestResult(
         message_id=msg.id,
         relevant=tri.relevant,
@@ -127,9 +153,9 @@ def digest_text(tasks: list[Task], ref: datetime) -> str:
     return "\n".join(lines)
 
 
-async def digest() -> dict:
+async def digest(user_id: int) -> dict:
     ref = config.now()
-    tasks = planner.live(store.list_tasks("open"), ref)
+    tasks = planner.live(repo.list_tasks(user_id, "open"), ref)
     if config.llm_enabled():
         try:
             from . import llm_agents
@@ -138,3 +164,32 @@ async def digest() -> dict:
         except Exception as e:
             log.warning("Digest LLM lỗi: %s", e)
     return {"mode": "offline", "text": digest_text(tasks, ref)}
+
+
+async def ai_selfcheck() -> dict:
+    """Gọi thật một lượt Triage để biết AI có chạy trực tiếp được không (dùng trước giờ demo)."""
+    from .. import agent_config
+
+    model = agent_config.get()["model"]
+    if not config.llm_enabled():
+        why = "MSTUDENT_OFFLINE=1" if config.is_offline_forced() else "chưa có OPENAI_API_KEY trên server"
+        return {"ok": False, "mode": "offline", "model": model, "error": f"AI đang tắt: {why}"}
+    from . import llm_agents
+
+    sample = Message(
+        source=Source.manual,
+        body="Các em nộp bài tập tuần 9 trước 23h59 thứ 6 tuần này nhé.",
+        received_at=config.now().isoformat(),
+    )
+    t0 = time.perf_counter()
+    try:
+        tri = await llm_agents.llm_triage(sample)
+    except Exception as e:
+        return {"ok": False, "mode": "llm", "model": model, "error": _short_error(e)}
+    return {
+        "ok": bool(tri.relevant),
+        "mode": "llm",
+        "model": model,
+        "latency_ms": round((time.perf_counter() - t0) * 1000),
+        "sample": tri.model_dump(mode="json"),
+    }
