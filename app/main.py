@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import agent_config, config
-from .routers import auth, core, google
+from .routers import auth, core, google, sources
+from .sync import scheduler
 
 ROOT = Path(__file__).resolve().parent
 
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 config.check_prod_config()
 
 app = FastAPI(
+    lifespan=scheduler.lifespan,  # bộ đồng bộ nền (tắt bằng MSTUDENT_SYNC_ENABLED=0)
     title="MStudent",
     version="1.0.0",
     description="AI inbox biến thông báo email/LMS/Zalo thành việc cần làm",
@@ -71,6 +73,7 @@ async def hardening(request: Request, call_next):
 app.include_router(auth.router)
 app.include_router(core.router)
 app.include_router(google.router)
+app.include_router(sources.router)
 
 
 @app.get("/api/health", tags=["public"])

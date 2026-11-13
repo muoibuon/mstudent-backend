@@ -212,6 +212,8 @@ def _row_to_task(r: sqlite3.Row) -> Task:
         status=r["status"],
         reminders=json.loads(r["reminders"] or "[]"),
         updated_from=json.loads(r["updated_from"] or "[]"),
+        sources=json.loads(r["sources"] or "[]"),  # cột luôn có (db._ensure_column)
+        note=r["note"],
     )
 
 
@@ -219,7 +221,7 @@ def insert_task(user_id: int, t: dict) -> Task:
     with connect() as c:
         cur = c.execute(
             "INSERT INTO tasks (user_id, title, course, category, due_at, location, action, priority, source,"
-            " message_id, reminders, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " message_id, reminders, created_at, sources, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 user_id,
                 t["title"],
@@ -233,6 +235,8 @@ def insert_task(user_id: int, t: dict) -> Task:
                 t["message_id"],
                 json.dumps(t.get("reminders", [])),
                 _iso(),
+                json.dumps(t.get("sources") or [t["source"]]),
+                t.get("note"),
             ),
         )
         return _row_to_task(c.execute("SELECT * FROM tasks WHERE id=?", (cur.lastrowid,)).fetchone())
@@ -240,13 +244,13 @@ def insert_task(user_id: int, t: dict) -> Task:
 
 TASK_FIELDS = {
     "title", "course", "category", "due_at", "location", "action", "priority", "status",
-    "reminders", "updated_from", "done_at",
+    "reminders", "updated_from", "done_at", "sources", "note",
 }  # fmt: skip
 
 
 def update_task(user_id: int, task_id: int, fields: dict) -> Task | None:
     fields = {k: v for k, v in fields.items() if k in TASK_FIELDS}
-    for k in ("reminders", "updated_from"):
+    for k in ("reminders", "updated_from", "sources"):
         if k in fields:
             fields[k] = json.dumps(fields[k])
     with connect() as c:
@@ -460,3 +464,214 @@ def save_settings(values: dict[str, str]) -> None:
 def clear_settings() -> None:
     with connect() as c:
         c.execute("DELETE FROM settings")
+
+
+# ---------------- Đồng bộ tự động (002) ----------------
+
+SYNC_KINDS = ("gmail", "classroom", "ics", "sheet")
+
+
+def _conn_row(r: sqlite3.Row | None) -> dict | None:
+    if not r:
+        return None
+    d = dict(r)
+    d["enabled"] = bool(d["enabled"])
+    d["state"] = json.loads(d.get("state") or "{}")
+    return d
+
+
+def create_connection(
+    user_id: int, kind: str, target: str = "", label: str = "", next_run_at: str | None = None
+) -> dict:
+    """Tạo (hoặc bật lại) nguồn; chạy lượt đầu ngay. Trả về bản ghi."""
+    assert kind in SYNC_KINDS
+    now = _iso()
+    with connect() as c:
+        c.execute(
+            "INSERT INTO sync_connections (user_id, kind, target, label, next_run_at, created_at)"
+            " VALUES (?,?,?,?,?,?) ON CONFLICT(user_id, kind, target)"
+            " DO UPDATE SET enabled=1, label=excluded.label, next_run_at=excluded.next_run_at,"
+            " fail_count=0, last_error=NULL",
+            (user_id, kind, target, label[:100], next_run_at or now, now),
+        )
+        r = c.execute(
+            "SELECT * FROM sync_connections WHERE user_id=? AND kind=? AND target=?", (user_id, kind, target)
+        ).fetchone()
+        return _conn_row(r)
+
+
+def count_connections(user_id: int, kind: str) -> int:
+    with connect() as c:
+        return c.execute(
+            "SELECT COUNT(*) FROM sync_connections WHERE user_id=? AND kind=?", (user_id, kind)
+        ).fetchone()[0]
+
+
+def list_connections(user_id: int) -> list[dict]:
+    with connect() as c:
+        rows = c.execute("SELECT * FROM sync_connections WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
+        return [_conn_row(r) for r in rows]
+
+
+def get_connection(user_id: int, conn_id: int) -> dict | None:
+    with connect() as c:
+        return _conn_row(
+            c.execute(
+                "SELECT * FROM sync_connections WHERE id=? AND user_id=?", (conn_id, user_id)
+            ).fetchone()
+        )
+
+
+def find_connection(user_id: int, kind: str, target: str = "") -> dict | None:
+    with connect() as c:
+        return _conn_row(
+            c.execute(
+                "SELECT * FROM sync_connections WHERE user_id=? AND kind=? AND target=?",
+                (user_id, kind, target),
+            ).fetchone()
+        )
+
+
+def set_connection_enabled(user_id: int, conn_id: int, enabled: bool) -> dict | None:
+    with connect() as c:
+        c.execute(
+            "UPDATE sync_connections SET enabled=?, fail_count=0, next_run_at=? WHERE id=? AND user_id=?",
+            (int(enabled), _iso(), conn_id, user_id),
+        )
+    return get_connection(user_id, conn_id)
+
+
+def run_connection_now(user_id: int, conn_id: int) -> bool:
+    with connect() as c:
+        cur = c.execute(
+            "UPDATE sync_connections SET next_run_at=? WHERE id=? AND user_id=? AND enabled=1",
+            (_iso(), conn_id, user_id),
+        )
+        return cur.rowcount == 1
+
+
+def delete_connection(user_id: int, conn_id: int) -> bool:
+    with connect() as c:
+        return (
+            c.execute("DELETE FROM sync_connections WHERE id=? AND user_id=?", (conn_id, user_id)).rowcount
+            == 1
+        )
+
+
+def delete_connections_of_kind(user_id: int, kinds: tuple[str, ...]) -> None:
+    with connect() as c:
+        for k in kinds:
+            c.execute("DELETE FROM sync_connections WHERE user_id=? AND kind=?", (user_id, k))
+
+
+def claim_due_connections(
+    now_iso: str, lease_until_iso: str, limit: int, due_before: str | None = None
+) -> list[dict]:
+    """Lấy các nguồn tới hạn và giữ chỗ (lease) để không chạy trùng. Dùng ở bộ lập lịch (toàn hệ thống).
+
+    `due_before` mặc định = now; test dùng mốc xa để lấy mọi nguồn đang bật."""
+    claimed = []
+    with connect() as c:
+        rows = c.execute(
+            "SELECT id FROM sync_connections WHERE enabled=1 AND next_run_at<=?"
+            " AND (lease_until IS NULL OR lease_until<?) ORDER BY next_run_at LIMIT ?",
+            (due_before or now_iso, now_iso, limit),
+        ).fetchall()
+        for (cid,) in rows:
+            cur = c.execute(
+                "UPDATE sync_connections SET lease_until=? WHERE id=? AND (lease_until IS NULL OR lease_until<?)",
+                (lease_until_iso, cid, now_iso),
+            )
+            if cur.rowcount == 1:
+                claimed.append(
+                    _conn_row(c.execute("SELECT * FROM sync_connections WHERE id=?", (cid,)).fetchone())
+                )
+    return claimed
+
+
+def finish_run(
+    conn_id: int,
+    *,
+    ok: bool,
+    next_run_at: str,
+    error: str | None = None,
+    cursor: str | None = None,
+    state: dict | None = None,
+    disable: bool = False,
+) -> None:
+    now = _iso()
+    with connect() as c:
+        if ok:
+            c.execute(
+                "UPDATE sync_connections SET lease_until=NULL, last_run_at=?, last_ok_at=?, last_error=NULL,"
+                " fail_count=0, next_run_at=?, cursor=COALESCE(?, cursor), state=COALESCE(?, state) WHERE id=?",
+                (now, now, next_run_at, cursor, json.dumps(state) if state is not None else None, conn_id),
+            )
+        else:
+            c.execute(
+                "UPDATE sync_connections SET lease_until=NULL, last_run_at=?, last_error=?, fail_count=fail_count+1,"
+                " next_run_at=?, enabled=CASE WHEN ? THEN 0 ELSE enabled END WHERE id=?",
+                (now, (error or "Lỗi không rõ")[:300], next_run_at, int(disable), conn_id),
+            )
+
+
+def get_source_item(conn_id: int, item_key: str) -> dict | None:
+    with connect() as c:
+        r = c.execute(
+            "SELECT * FROM source_items WHERE connection_id=? AND item_key=?", (conn_id, item_key)
+        ).fetchone()
+        return dict(r) if r else None
+
+
+def upsert_source_item(
+    user_id: int, conn_id: int, item_key: str, content_hash: str, task_id: int | None
+) -> None:
+    now = _iso()
+    with connect() as c:
+        c.execute(
+            "INSERT INTO source_items (connection_id, user_id, item_key, content_hash, task_id, first_seen_at,"
+            " last_seen_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(connection_id, item_key) DO UPDATE SET"
+            " content_hash=excluded.content_hash, task_id=COALESCE(excluded.task_id, task_id),"
+            " last_seen_at=excluded.last_seen_at, gone=0",
+            (conn_id, user_id, item_key[:200], content_hash, task_id, now, now),
+        )
+
+
+def mark_items_gone(conn_id: int, keep_keys: set[str]) -> list[dict]:
+    """Đánh dấu mục không còn ở nguồn; trả về các mục vừa biến mất (để ghi chú lên việc)."""
+    with connect() as c:
+        rows = c.execute("SELECT * FROM source_items WHERE connection_id=? AND gone=0", (conn_id,)).fetchall()
+        gone = [dict(r) for r in rows if r["item_key"] not in keep_keys]
+        for g in gone:
+            c.execute(
+                "UPDATE source_items SET gone=1 WHERE connection_id=? AND item_key=?",
+                (conn_id, g["item_key"]),
+            )
+        return gone
+
+
+def upsert_push_token(user_id: int, token: str, platform: str, notify: bool) -> None:
+    with connect() as c:
+        c.execute(
+            "INSERT INTO push_tokens (token, user_id, platform, notify, created_at) VALUES (?,?,?,?,?)"
+            " ON CONFLICT(token) DO UPDATE SET user_id=excluded.user_id, platform=excluded.platform,"
+            " notify=excluded.notify",
+            (token, user_id, platform, int(notify), _iso()),
+        )
+
+
+def delete_push_token(user_id: int, token: str) -> None:
+    with connect() as c:
+        c.execute("DELETE FROM push_tokens WHERE token=? AND user_id=?", (token, user_id))
+
+
+def drop_push_token(token: str) -> None:
+    """Expo báo thiết bị không còn đăng ký → xoá (gọi từ bộ gửi thông báo)."""
+    with connect() as c:
+        c.execute("DELETE FROM push_tokens WHERE token=?", (token,))
+
+
+def push_tokens_for(user_id: int) -> list[str]:
+    with connect() as c:
+        rows = c.execute("SELECT token FROM push_tokens WHERE user_id=? AND notify=1", (user_id,)).fetchall()
+        return [r[0] for r in rows]

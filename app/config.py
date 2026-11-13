@@ -180,6 +180,45 @@ def trust_proxy() -> bool:
     return os.getenv("MSTUDENT_TRUST_PROXY") == "1"
 
 
+# ---------------- Đồng bộ tự động (002-auto-ingest) ----------------
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def sync_enabled() -> bool:
+    """Bộ đồng bộ nền (Gmail, Classroom, bảng lớp, lịch LMS). Mặc định bật; test đặt 0."""
+    return os.getenv("MSTUDENT_SYNC_ENABLED", "1") == "1"
+
+
+def gmail_poll_s() -> int:
+    """Chu kỳ kiểm tra Gmail dự phòng (giây) khi không có / lỗi kênh báo ngay Pub/Sub."""
+    return max(30, _int_env("MSTUDENT_GMAIL_POLL_S", 120))
+
+
+def sync_concurrency() -> int:
+    return max(1, min(_int_env("MSTUDENT_SYNC_CONCURRENCY", 4), 16))
+
+
+def public_url() -> str:
+    """Địa chỉ HTTPS công khai của backend (vd https://mstudent.x.ts.net), dùng cho aud của webhook."""
+    return os.getenv("MSTUDENT_PUBLIC_URL", "").rstrip("/")
+
+
+def pubsub_topic() -> str:
+    """projects/<id>/topics/<tên>: topic nhận thông báo Gmail. Trống = chỉ kiểm tra định kỳ."""
+    return os.getenv("MSTUDENT_PUBSUB_TOPIC", "")
+
+
+def pubsub_push_sa() -> str:
+    """Email service account mà Pub/Sub dùng để ký JWT khi gọi /api/hooks/gmail."""
+    return os.getenv("MSTUDENT_PUBSUB_PUSH_SA", "").lower()
+
+
 def alert_webhook() -> str:
     """URL webhook (Discord/Slack/Telegram bot) nhận cảnh báo chi phí. Trống = không gửi."""
     return os.getenv("MSTUDENT_ALERT_WEBHOOK", "")

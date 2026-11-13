@@ -1,6 +1,7 @@
 import os
 
 os.environ["MSTUDENT_OFFLINE"] = "1"
+os.environ["MSTUDENT_SYNC_ENABLED"] = "0"  # không chạy vòng đồng bộ nền trong test
 os.environ["MSTUDENT_NOW"] = "2026-11-10T08:00:00+07:00"
 os.environ["MSTUDENT_SECRET_KEY"] = "test-secret-key-0123456789abcdef0123456789abcdef"
 os.environ.pop("MSTUDENT_ADMIN_EMAILS", None)

@@ -89,9 +89,53 @@ CREATE TABLE IF NOT EXISTS rate_counters (
 );
 -- Đã gửi cảnh báo chi phí mức nào (80, 100) trong ngày nào — để mỗi mức chỉ báo một lần mỗi ngày.
 CREATE TABLE IF NOT EXISTS budget_alerts (day TEXT NOT NULL, level INTEGER NOT NULL, PRIMARY KEY (day, level));
+-- Đồng bộ tự động (002): mỗi nguồn của một người dùng; token Google vẫn ở google_accounts (mã hoá).
+CREATE TABLE IF NOT EXISTS sync_connections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,                  -- gmail | classroom | ics | sheet
+    target TEXT NOT NULL DEFAULT '',     -- URL .ics / URL bảng đã chuẩn hoá; rỗng với gmail/classroom
+    label TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    cursor TEXT,                         -- historyId Gmail, ETag .ics…
+    state TEXT NOT NULL DEFAULT '{}',    -- JSON nhỏ (ánh xạ cột bảng, hạn watch, thống kê lượt gần nhất)
+    next_run_at TEXT NOT NULL,
+    lease_until TEXT,
+    last_run_at TEXT, last_ok_at TEXT, last_error TEXT,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    UNIQUE (user_id, kind, target)
+);
+CREATE INDEX IF NOT EXISTS ix_sync_due ON sync_connections(enabled, next_run_at);
+-- Mục đã thấy ở nguồn: chống trùng và phát hiện thay đổi. task_id không FK cứng (việc có thể bị xoá).
+CREATE TABLE IF NOT EXISTS source_items (
+    connection_id INTEGER NOT NULL REFERENCES sync_connections(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    task_id INTEGER,
+    first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL,
+    gone INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (connection_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform TEXT NOT NULL,
+    notify INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, last_ok_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_push_user ON push_tokens(user_id);
 """
 
 _initialized: set[str] = set()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    # table/column/decl là hằng số trong code, không bao giờ từ người dùng.
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
 def _init(conn: sqlite3.Connection) -> None:
@@ -106,6 +150,9 @@ def _init(conn: sqlite3.Connection) -> None:
             )
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    # Cột thêm sau (CSDL production đã có dữ liệu → chỉ ALTER khi thiếu, không tạo lại bảng).
+    _ensure_column(conn, "tasks", "sources", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "tasks", "note", "TEXT")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
 

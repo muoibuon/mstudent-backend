@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -13,6 +14,8 @@ class Source(str, Enum):
     lms = "lms"
     zalo = "zalo"
     manual = "manual"
+    classroom = "classroom"
+    sheet = "sheet"
 
 
 class Category(str, Enum):
@@ -80,6 +83,8 @@ class Task(BaseModel):
     status: str = "open"
     reminders: list[str] = []
     updated_from: list[str] = []
+    sources: list[str] = []
+    note: str | None = None
 
 
 class TaskPatch(BaseModel):
@@ -198,3 +203,34 @@ class GoogleConnectRequest(BaseModel):
 class GmailSyncRequest(BaseModel):
     days: int = Field(7, ge=1, le=30)
     max_messages: int = Field(15, ge=1, le=30)
+
+
+# ---------------- Đồng bộ tự động (002) ----------------
+
+
+class SourceCreate(BaseModel):
+    kind: Literal["ics", "sheet"]
+    url: str = Field(min_length=8, max_length=2000)
+    label: str = Field("", max_length=100)
+
+
+class SourcePatch(BaseModel):
+    enabled: bool
+
+
+class SourceOut(BaseModel):
+    id: int
+    kind: str
+    label: str
+    enabled: bool
+    last_run_at: str | None = None
+    last_ok_at: str | None = None
+    last_error: str | None = None
+    created_at: str
+    last: dict | None = None  # thống kê lượt gần nhất: created / updated / skipped / mode
+
+
+class PushRegister(BaseModel):
+    token: str = Field(max_length=200, pattern=r"^Expo(nent)?PushToken\[[A-Za-z0-9_\-]{1,180}\]$")
+    platform: Literal["android", "ios"]
+    notify: bool = True

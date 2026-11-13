@@ -151,3 +151,87 @@ def test_ai_rate_limit(client, user):
     h, _ = user
     codes = [client.post("/api/chat", json={"message": "chào"}, headers=h).status_code for _ in range(32)]
     assert codes[:30] == [200] * 30 and codes[-1] == 429
+
+
+# ---------------- Nguồn tự động (002): cách ly người dùng ----------------
+
+
+def _fake_probe(monkeypatch):
+    from app.routers import sources
+
+    async def probe(kind, url):
+        return url, "Bảng thử"
+
+    monkeypatch.setattr(sources, "_probe", probe)
+
+
+def test_sources_require_login_and_are_isolated(client, monkeypatch):
+    _fake_probe(monkeypatch)
+    assert client.get("/api/sources").status_code == 401
+    assert (
+        client.post(
+            "/api/push/register", json={"token": "ExponentPushToken[x]", "platform": "android"}
+        ).status_code
+        == 401
+    )
+    a, b = auth(signup(client, "a@x.vn")), auth(signup(client, "b@x.vn"))
+    r = client.post(
+        "/api/sources",
+        json={"kind": "sheet", "url": "https://docs.google.com/spreadsheets/d/abc/edit"},
+        headers=a,
+    )
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert "target" not in r.json() and r.json()["label"] == "Bảng thử"
+    assert client.get("/api/sources", headers=b).json() == []
+    assert client.patch(f"/api/sources/{sid}", json={"enabled": False}, headers=b).status_code == 404
+    assert client.post(f"/api/sources/{sid}/sync", headers=b).status_code == 404
+    assert client.delete(f"/api/sources/{sid}", headers=b).status_code == 404
+    assert client.patch(f"/api/sources/{sid}", json={"enabled": False}, headers=a).json()["enabled"] is False
+    assert client.delete(f"/api/sources/{sid}", headers=a).status_code == 200
+    assert client.get("/api/sources", headers=a).json() == []
+
+
+def test_sources_limits_and_duplicates(client, user, monkeypatch):
+    _fake_probe(monkeypatch)
+    h, _ = user
+    url = "https://docs.google.com/spreadsheets/d/{}/edit"
+    assert (
+        client.post("/api/sources", json={"kind": "sheet", "url": url.format(0)}, headers=h).status_code
+        == 201
+    )
+    assert (
+        client.post("/api/sources", json={"kind": "sheet", "url": url.format(0)}, headers=h).status_code
+        == 409
+    )
+    for i in range(1, 10):
+        assert (
+            client.post("/api/sources", json={"kind": "sheet", "url": url.format(i)}, headers=h).status_code
+            == 201
+        )
+    assert (
+        client.post("/api/sources", json={"kind": "sheet", "url": url.format(99)}, headers=h).status_code
+        == 422
+    )
+    assert client.post("/api/sources", json={"kind": "gmail", "url": "x"}, headers=h).status_code == 422
+
+
+def test_push_tokens_are_owned_per_user(client):
+    import sqlite3
+
+    from app import config
+
+    a, b = auth(signup(client, "a@x.vn")), auth(signup(client, "b@x.vn"))
+    tok = {"token": "ExponentPushToken[abc123]", "platform": "android", "notify": True}
+    assert (
+        client.post("/api/push/register", json={**tok, "token": "not-a-token"}, headers=a).status_code == 422
+    )
+    assert client.post("/api/push/register", json=tok, headers=a).status_code == 200
+    client.request("DELETE", "/api/push/register", json=tok, headers=b)  # B không xoá được token của A
+    db = sqlite3.connect(config.DB_PATH)
+    assert db.execute("SELECT COUNT(*) FROM push_tokens").fetchone()[0] == 1
+    assert (
+        client.post("/api/push/register", json=tok, headers=b).status_code == 200
+    )  # máy đổi tài khoản → chuyển chủ
+    owner = db.execute("SELECT u.email FROM push_tokens p JOIN users u ON u.id=p.user_id").fetchone()[0]
+    assert owner == "b@x.vn"
