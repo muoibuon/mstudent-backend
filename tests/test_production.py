@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app import config, deps
+from app import config, deps, repo
+from tests.conftest import auth, signup
 
 SECRET = "prod-secret-key-0123456789abcdef0123456789abcdef"
 
@@ -267,8 +268,6 @@ def test_llm_timeout_falls_back_to_rules(client, user, llm_on, monkeypatch):
 
 
 def test_ai_check_reports_budget_exhausted(client, user, llm_on, monkeypatch):
-    from app import repo
-
     monkeypatch.setenv("MSTUDENT_LLM_DAILY_USD", "1")
     repo.record_llm_usage(None, "Eval", 0, 0, 2.0, 10)
     r = client.post("/api/ai/check", headers=user[0]).json()
@@ -314,3 +313,94 @@ def test_backup_script_copies_restorable_db_and_prunes_old(client, user, tmp_pat
     assert dest.stat().st_mode & 0o777 == 0o600 and out_dir.stat().st_mode & 0o777 == 0o700
     names = sorted(p.name for p in out_dir.iterdir())
     assert names == ["ghi-chu.txt", "mstudent-20261109.db", "mstudent-20261110.db"]  # bản quá 7 ngày bị xoá
+
+
+# ---------------- Số liệu cho admin (US3) ----------------
+
+STATS_KEYS = {
+    "generated_at",
+    "users_total",
+    "users_active_7d",
+    "messages_total",
+    "messages_by_mode",
+    "tasks_total",
+    "llm_cost_today_usd",
+    "llm_budget_usd",
+    "llm_budget_exhausted",
+    "llm_cost_per_active_user_usd",
+    "median_latency_ms",
+}
+
+
+def test_admin_stats_requires_admin(client, monkeypatch):
+    monkeypatch.setenv("MSTUDENT_ADMIN_EMAILS", "boss@x.vn")
+    normal = auth(signup(client, "sv@x.vn"))
+    assert client.get("/api/admin/stats").status_code == 401
+    assert client.get("/api/admin/stats", headers=normal).status_code == 403
+
+
+def test_admin_stats_aggregates_without_personal_data(client, monkeypatch):
+    monkeypatch.setenv("MSTUDENT_NOW", "2026-11-13T10:00:00+07:00")
+    monkeypatch.setenv("MSTUDENT_ADMIN_EMAILS", "boss@x.vn")
+    monkeypatch.setenv("MSTUDENT_LLM_DAILY_USD", "5")
+    boss = auth(signup(client, "boss@x.vn"))
+    sv = signup(client, "sv-bi-mat@x.vn")
+    signup(client, "khong-dung@x.vn")
+    secret_text = "Nộp đồ án bí mật XYZ trước 23h59 ngày 20/11"
+    client.post("/api/ingest", json={"source": "zalo", "body": secret_text}, headers=auth(sv))
+    sv_id = client.get("/api/auth/me", headers=auth(sv)).json()["id"]
+    repo.record_llm_usage(sv_id, "Triage", 1000, 200, 0.10, 1000)
+    repo.record_llm_usage(sv_id, "Extractor", 1000, 200, 0.20, 3000)
+    repo.record_llm_usage(None, "Eval", 1000, 200, 0.30, 2000)
+
+    r = client.get("/api/admin/stats", headers=boss)
+    assert r.status_code == 200
+    s = r.json()
+    assert set(s) == STATS_KEYS
+    assert s["generated_at"].startswith("2026-11-13T10:00")
+    assert s["users_total"] == 3
+    assert s["users_active_7d"] == 1
+    assert s["messages_total"] == 1
+    assert s["messages_by_mode"] == {"offline": 1}
+    assert s["tasks_total"] >= 1
+    assert s["llm_cost_today_usd"] == 0.6
+    assert s["llm_budget_usd"] == 5.0 and s["llm_budget_exhausted"] is False
+    assert s["llm_cost_per_active_user_usd"] == 0.6
+    assert s["median_latency_ms"] == 2000
+    text = r.text
+    for leak in ("sv-bi-mat", "boss@x.vn", "XYZ", "bí mật"):
+        assert leak not in text
+
+
+def test_admin_stats_empty_db_has_no_division_errors(client, monkeypatch):
+    monkeypatch.setenv("MSTUDENT_ADMIN_EMAILS", "boss@x.vn")
+    s = client.get("/api/admin/stats", headers=auth(signup(client, "boss@x.vn"))).json()
+    assert s["users_active_7d"] == 0
+    assert s["llm_cost_per_active_user_usd"] == 0.0 and s["median_latency_ms"] is None
+
+
+# ---------------- Đầu ra LLM dạng chữ ----------------
+
+
+def test_llm_text_output_strips_untrusted_data_wrapper():
+    from app.pipeline import llm_agents
+
+    raw = "<thong_bao>\nHôm nay có 0 việc gấp.\n</thong_bao_>\n< /THONG_BAO >"
+    assert llm_agents.clean_text(raw) == "Hôm nay có 0 việc gấp."
+
+
+def test_digest_llm_output_has_no_wrapper_tags(client, user, llm_on, monkeypatch):
+    from app.pipeline import llm_agents
+
+    async def fake_run(agent, payload, **kwargs):
+        return _FakeResult("<thong_bao>\nBản tin: không có việc gấp.\n</thong_bao>")
+
+    monkeypatch.setattr(llm_agents.Runner, "run", fake_run)
+    h, _ = user
+    text = client.get("/api/digest", headers=h).json()["text"]
+    assert "thong_bao" not in text and "Bản tin: không có việc gấp." in text
+
+
+def test_web_console_assets_revalidate_after_deploy(client):
+    for path in ("/", "/static/app.js"):
+        assert client.get(path).headers["cache-control"] == "no-cache"

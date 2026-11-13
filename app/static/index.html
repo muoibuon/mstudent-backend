@@ -36,6 +36,7 @@
     <button role="tab" data-tab="trace" aria-selected="false">🧭 Agent trace</button>
     <button role="tab" data-tab="calendar" aria-selected="false">🗓️ Lịch tuần</button>
     <button role="tab" data-tab="config" aria-selected="false">⚙️ Cấu hình agent</button>
+    <button role="tab" data-tab="stats" aria-selected="false" id="statsTabBtn" class="hidden">📊 Số liệu</button>
   </nav>
 </header>
 
@@ -104,6 +105,16 @@
         <p class="meta">Chạy bộ case trong <code>eval/cases.json</code> với cấu hình hiện tại. Sửa prompt → Lưu → chạy lại để so sánh.</p>
         <div id="evalOut"></div>
       </div>
+    </div>
+  </section>
+
+  <!-- ===== Số liệu (chỉ admin) ===== -->
+  <section id="tab-stats" class="hidden">
+    <div class="card">
+      <h2>Số liệu hệ thống <span class="grow"></span><span class="meta" id="statsAt"></span><button class="ghost sm" id="statsRefresh">Làm mới</button></h2>
+      <p class="meta">Chỉ số tổng hợp toàn hệ thống, không có email hay nội dung của người dùng. "Hoạt động" = có gửi thông báo hoặc dùng AI trong 7 ngày.</p>
+      <div class="scores" id="statsGrid"></div>
+      <p class="meta" id="statsModes"></p>
     </div>
   </section>
 </main>

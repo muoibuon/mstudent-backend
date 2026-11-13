@@ -61,6 +61,8 @@ async def hardening(request: Request, call_next):
         h["Content-Security-Policy"] = CSP
     if request.url.path.startswith("/api/"):
         h["Cache-Control"] = "no-store"
+    elif request.url.path == "/" or request.url.path.startswith("/static/"):
+        h["Cache-Control"] = "no-cache"  # trình duyệt hỏi lại (ETag) nên luôn lấy bản mới sau khi deploy
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response

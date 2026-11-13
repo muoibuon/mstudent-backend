@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import statistics
 from datetime import timedelta
 
 from . import config
@@ -393,6 +394,40 @@ def record_llm_usage(
 def llm_cost_on(day: str) -> float:
     with connect() as c:
         return c.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE day=?", (day,)).fetchone()[0]
+
+
+def stats_summary(now) -> dict:
+    """Số liệu tổng hợp toàn hệ thống cho admin. Chỉ đếm/tổng, không trả email, tên hay nội dung."""
+    since = (now - timedelta(days=7)).isoformat()
+    since_day = (now - timedelta(days=6)).date().isoformat()
+    today = now.date().isoformat()
+    with connect() as c:
+
+        def one(sql: str, args: tuple = ()):
+            return c.execute(sql, args).fetchone()[0]
+
+        active = one(
+            "SELECT COUNT(*) FROM (SELECT user_id FROM traces WHERE created_at >= ?"
+            " UNION SELECT user_id FROM llm_usage WHERE user_id IS NOT NULL AND day >= ?)",
+            (since, since_day),
+        )
+        cost_7d = one("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE day >= ?", (since_day,))
+        latencies = [r[0] for r in c.execute("SELECT latency_ms FROM llm_usage WHERE day >= ?", (since_day,))]
+        return {
+            "users_total": one("SELECT COUNT(*) FROM users"),
+            "users_active_7d": active,
+            "messages_total": one("SELECT COUNT(*) FROM messages"),
+            "messages_by_mode": {
+                r[0]: r[1]
+                for r in c.execute("SELECT mode, COUNT(*) FROM traces WHERE mode IS NOT NULL GROUP BY mode")
+            },
+            "tasks_total": one("SELECT COUNT(*) FROM tasks"),
+            "llm_cost_today_usd": round(
+                one("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE day=?", (today,)), 4
+            ),
+            "llm_cost_per_active_user_usd": round(cost_7d / active, 4) if active else 0.0,
+            "median_latency_ms": int(statistics.median(latencies)) if latencies else None,
+        }
 
 
 def mark_budget_alert(day: str, level: int) -> bool:

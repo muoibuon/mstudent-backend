@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import agent_config, config, evaluation, repo
+from .. import agent_config, budget, config, evaluation, repo
 from ..connectors import lms_ics, zalo
 from ..deps import admin_user, ai_limit, client_ip, current_user, enforce
 from ..models import ChatRequest, ChatResponse, IcsUrl, IngestResult, Message, Task, TaskPatch, ZaloPaste
@@ -171,6 +171,17 @@ async def run_eval(admin: dict = Depends(admin_user)):
 @router.get("/admin/audit")
 def audit_log(limit: int = 100, admin: dict = Depends(admin_user)):
     return repo.list_audit(max(1, min(limit, 500)))
+
+
+@router.get("/admin/stats")
+def admin_stats(admin: dict = Depends(admin_user)):
+    now = config.now()
+    return {
+        "generated_at": now.isoformat(),
+        **repo.stats_summary(now),
+        "llm_budget_usd": config.llm_daily_usd(),
+        "llm_budget_exhausted": budget.exhausted(),
+    }
 
 
 @router.get("/admin/overview")

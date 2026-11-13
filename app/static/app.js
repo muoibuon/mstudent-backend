@@ -44,7 +44,7 @@ const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', {timeZone:TZ}); //
 let NOW = new Date();
 
 /* ---------- Tabs ---------- */
-const TABS = ['chat', 'trace', 'calendar', 'config'];
+const TABS = ['chat', 'trace', 'calendar', 'config', 'stats'];
 function openTab(name) {
   for (const t of TABS) $('tab-' + t).classList.toggle('hidden', t !== name);
   document.querySelectorAll('nav button').forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === name));
@@ -52,6 +52,7 @@ function openTab(name) {
   if (name === 'trace') loadTraces();
   if (name === 'calendar') renderWeek();
   if (name === 'config') loadConfig();
+  if (name === 'stats') loadStats();
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => openTab(b.dataset.tab));
 
@@ -220,6 +221,28 @@ $('evalBtn').onclick = async () => {
   $('evalBtn').disabled = false;
 };
 
+/* ---------- Số liệu (admin) ---------- */
+const usd = (v) => '$' + Number(v).toFixed(v < 1 ? 4 : 2);
+async function loadStats() {
+  $('statsGrid').replaceChildren(h('p', {class:'meta'}, 'Đang tải…'));
+  try {
+    const s = await api('/api/admin/stats');
+    const tile = (label, value, sub, cls) => h('div', {class:'score'}, h('span', {class:'meta'}, label), h('b', {class: cls || ''}, value), h('span', {class:'meta'}, sub || ''));
+    $('statsGrid').replaceChildren(
+      tile('Người dùng', s.users_total, 'tổng tài khoản'),
+      tile('Hoạt động 7 ngày', s.users_active_7d, s.users_total ? Math.round(100 * s.users_active_7d / s.users_total) + '% tổng' : ''),
+      tile('Thông báo đã xử lý', s.messages_total, 'Gmail, Zalo, LMS…'),
+      tile('Việc đã tạo', s.tasks_total, 'từ thông báo'),
+      tile('Chi phí AI hôm nay', usd(s.llm_cost_today_usd), 'trần ' + usd(s.llm_budget_usd) + '/ngày', s.llm_budget_exhausted ? 'bad' : 'ok'),
+      tile('Chi phí / người / tuần', usd(s.llm_cost_per_active_user_usd), 'người hoạt động'),
+      tile('Độ trễ AI (trung vị)', s.median_latency_ms == null ? '–' : (s.median_latency_ms / 1000).toFixed(1) + ' s', '7 ngày'));
+    const modes = Object.entries(s.messages_by_mode);
+    $('statsModes').textContent = modes.length ? 'Theo chế độ: ' + modes.map(([m, n]) => `${m} ${n}`).join(' · ') + (s.llm_budget_exhausted ? ' · ⚠️ đã chạm trần chi phí, đang chạy luật' : '') : '';
+    $('statsAt').textContent = 'cập nhật ' + fmtDT(s.generated_at) + ' ';
+  } catch (e) { $('statsGrid').replaceChildren(h('p', {class:'bad'}, '⚠️ ' + e.message)); }
+}
+$('statsRefresh').onclick = loadStats;
+
 /* ---------- Khởi động ---------- */
 async function loadHealth() {
   const s = await (await fetch('/api/health')).json();
@@ -268,11 +291,12 @@ $('logoutBtn').onclick = async () => {
 async function enterApp() {
   $('login').classList.add('hidden'); $('app').classList.remove('hidden');
   $('userPill').textContent = '👤 ' + ME.email + (ME.is_admin ? ' · admin' : '');
+  $('statsTabBtn').classList.toggle('hidden', !ME.is_admin);
   greet();
   await loadHealth();
   await refreshAll();
   let tab = 'chat'; try { tab = sessionStorage.getItem('tab') || 'chat'; } catch {}
-  openTab(TABS.includes(tab) ? tab : 'chat');
+  openTab(TABS.includes(tab) && (tab !== 'stats' || ME.is_admin) ? tab : 'chat');
 }
 (async () => {
   renderLoginMode();

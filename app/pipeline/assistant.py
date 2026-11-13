@@ -16,7 +16,7 @@ from datetime import datetime
 
 from .. import budget, config, repo
 from ..models import Category, ChatResponse, ChatTurn, Message, Priority, Source, ToolCall
-from . import orchestrator, planner, rules
+from . import llm_agents, orchestrator, planner, rules
 
 log = logging.getLogger("mstudent")
 
@@ -78,7 +78,6 @@ async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> Chat
     from agents.items import ToolCallItem, ToolCallOutputItem
 
     from .. import agent_config
-    from . import llm_agents
 
     @function_tool
     def list_tasks(days: int | None, category: str | None) -> str:
@@ -135,7 +134,7 @@ async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> Chat
             calls.append(ToolCall(tool=getattr(raw, "name", "tool"), args=args))
         elif isinstance(it, ToolCallOutputItem) and calls:
             calls[-1].result = str(it.output)[:1500]
-    return ChatResponse(reply=str(res.final_output), mode="llm", tool_calls=calls)
+    return ChatResponse(reply=llm_agents.clean_text(str(res.final_output)), mode="llm", tool_calls=calls)
 
 
 # ---------------- Chế độ offline ----------------

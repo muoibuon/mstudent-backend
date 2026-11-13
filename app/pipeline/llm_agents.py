@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 
 from agents import Agent, Runner
@@ -31,6 +32,14 @@ def _agent(name: str, prompt_key: str, output_type=None) -> Agent:
 def _clean(text: str) -> str:
     """Không cho nội dung thông báo tự đóng thẻ dữ liệu."""
     return text.replace("</thong_bao>", "</thong_bao_>").replace("<thong_bao>", "<thong_bao_>")
+
+
+_WRAPPER_TAG = re.compile(r"<\s*/?\s*thong_bao_?\s*>", re.IGNORECASE)
+
+
+def clean_text(text: str) -> str:
+    """Đầu ra chữ của LLM (bản tin, trả lời chat): bỏ thẻ bọc dữ liệu nếu model chép lại."""
+    return _WRAPPER_TAG.sub("", text).strip()
 
 
 def render(msg: Message) -> str:
@@ -70,4 +79,4 @@ async def llm_digest(tasks: list[Task], user_id: int | None = None) -> str:
         f"Bây giờ là {now().isoformat()}.\nTasks:\n{payload}",
         user_id=user_id,
     )
-    return str(res.final_output)
+    return clean_text(str(res.final_output))
