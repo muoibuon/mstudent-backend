@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import ipaddress
+import logging
 import re
 import socket
 from datetime import datetime, timedelta
@@ -25,7 +27,7 @@ from .. import budget, config, repo
 from ..models import Message, SheetMapping, Source, TaskOut
 from ..pipeline import llm_agents, orchestrator, planner
 from . import scheduler
-from .common import guess_category, short_hash
+from .common import MAX_ITEMS_PER_RUN, guess_category, short_hash
 from .scheduler import RunResult
 
 MAX_BYTES = 1_000_000
@@ -112,8 +114,17 @@ async def fetch_csv(sheet_id: str, gid: str) -> str:
     raise SheetError("Quá nhiều lần chuyển hướng")
 
 
+MAX_CELL = 500
+MAX_MAPPER_COLS = 30
+csv.field_size_limit(MAX_BYTES)
+log = logging.getLogger("mstudent")
+
+
 def parse_csv(text: str) -> tuple[list[str], list[list[str]]]:
-    rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text))]
+    try:
+        rows = [[c.strip()[:MAX_CELL] for c in r] for r in csv.reader(io.StringIO(text))]
+    except csv.Error as e:
+        raise SheetError("Không đọc được bảng (định dạng lạ)") from e
     rows = [r for r in rows if any(r)]
     if len(rows) > MAX_ROWS + 1:
         raise SheetError(f"Bảng có quá nhiều dòng (tối đa {MAX_ROWS})")
@@ -178,7 +189,7 @@ def _from_model(m: SheetMapping, ncols: int) -> dict[str, int]:
 async def map_columns(
     header: list[str], samples: list[list[str]], user_id: int
 ) -> tuple[dict[str, int], str]:
-    if budget.llm_allowed(user_id):
+    if len(header) <= MAX_MAPPER_COLS and budget.llm_allowed(user_id):
         try:
             m = _from_model(await llm_agents.llm_map_sheet(header, samples, user_id), len(header))
             if "title" in m:
@@ -255,8 +266,11 @@ async def run(conn: dict) -> RunResult:
     mapping = {k: int(v) for k, v in state["mapping"].items()}
     ref = config.now()
     seen: set[str] = set()
+    processed = 0
+    state.pop("more", None)
 
     for row in rows:
+        await asyncio.sleep(0)  # nhường event loop: một bảng lớn không làm treo máy chủ
         title, course = _cell(row, mapping, "title"), _cell(row, mapping, "course")
         if not title:
             continue
@@ -267,50 +281,16 @@ async def run(conn: dict) -> RunResult:
         if prev and prev["content_hash"] == chash:
             res.skipped += 1
             continue
-        if prev and prev["task_id"]:
-            task = repo.get_task(uid, prev["task_id"])
-            if (
-                task is None or task.status == "done"
-            ):  # người dùng đã xoá / đã xong → không tạo lại, không mở lại
-                repo.upsert_source_item(uid, conn["id"], key, chash, None)
-                res.skipped += 1
-                continue
-        due_text = " ".join(x for x in (_cell(row, mapping, "due"), _cell(row, mapping, "time")) if x)
-        due = parse_due(due_text, ref)
-        if first and due and datetime.fromisoformat(due) < ref - timedelta(days=1):
-            repo.upsert_source_item(uid, conn["id"], key, chash, None)  # bài cũ ở lượt đầu: bỏ qua (FR-075)
-            res.skipped += 1
+        if processed >= MAX_ITEMS_PER_RUN:
+            state["more"] = True  # phần còn lại để lượt sau
             continue
-        note = _cell(row, mapping, "note")
-        if due_text and not due:
-            # Không đọc được ngày bằng luật → đưa cả dòng qua pipeline AI như một thông báo.
-            msg = Message(
-                id=f"sheet-{conn['id']}-{chash}",
-                source=Source.sheet,
-                subject=f"Bảng lớp: {conn['label']}"[:500],
-                body=f"{course} — {title} — Hạn: {due_text}" + (f" — {note}" if note else ""),
-                received_at=ref.isoformat(),
-            )
-            out = await orchestrator.ingest(uid, msg)
-            created, updated = out.created, out.updated
-            if out.mode in ("llm", "offline"):
-                res.mode = out.mode if res.mode == "structured" else res.mode
-        else:
-            draft = TaskOut(
-                title=title[:80],
-                course=course[:60] or None,
-                category=guess_category(title),
-                due_at=due,
-                location=None,
-                action=note[:200] or None,
-            )
-            created, updated = planner.plan(
-                uid, [draft], source="sheet", message_id=f"sheet-{conn['id']}-{key}", ref=ref
-            )
-        res.created += created
-        res.updated += updated
-        touched = (created + updated)[:1]
-        repo.upsert_source_item(uid, conn["id"], key, chash, touched[0].id if touched else None)
+        processed += 1
+        try:
+            await _row(conn, uid, row, mapping, key, chash, prev, title, course, first, ref, res)
+        except Exception as e:  # một dòng hỏng không làm hỏng cả bảng; không đổi thì lần sau bỏ qua
+            log.warning("Bỏ qua 1 dòng bảng lớp (nguồn %s): %s", conn["id"], type(e).__name__)
+            repo.upsert_source_item(uid, conn["id"], key, chash, None)
+            res.skipped += 1
 
     stamp = ref.strftime("%d/%m")
     for g in repo.mark_items_gone(conn["id"], seen):
@@ -318,6 +298,52 @@ async def run(conn: dict) -> RunResult:
         if task and task.status == "open":
             repo.update_task(uid, task.id, {"note": f"Không còn trong bảng lớp ({stamp})"})
     return res
+
+
+async def _row(conn, uid, row, mapping, key, chash, prev, title, course, first, ref, res: RunResult) -> None:
+    if prev and prev["task_id"]:
+        task = repo.get_task(uid, prev["task_id"])
+        if task is None or task.status == "done":  # người dùng đã xoá / đã xong → không tạo lại, không mở lại
+            repo.upsert_source_item(uid, conn["id"], key, chash, None)
+            res.skipped += 1
+            return
+    due_text = " ".join(x for x in (_cell(row, mapping, "due"), _cell(row, mapping, "time")) if x)
+    due = parse_due(due_text, ref)
+    if first and due and datetime.fromisoformat(due) < ref - timedelta(days=1):
+        repo.upsert_source_item(uid, conn["id"], key, chash, None)  # bài cũ ở lượt đầu: bỏ qua (FR-075)
+        res.skipped += 1
+        return
+    note = _cell(row, mapping, "note")
+    if due_text and not due:
+        # Không đọc được ngày bằng luật → đưa cả dòng qua pipeline AI như một thông báo.
+        body = f"{course} — {title} — Hạn: {due_text}" + (f" — {note}" if note else "")
+        msg = Message(
+            id=f"sheet-{conn['id']}-{chash}",
+            source=Source.sheet,
+            subject=f"Bảng lớp: {conn['label']}"[:500],
+            body=body[:8000],
+            received_at=ref.isoformat(),
+        )
+        out = await orchestrator.ingest(uid, msg)
+        created, updated = out.created, out.updated
+        if out.mode in ("llm", "offline") and res.mode == "structured":
+            res.mode = out.mode
+    else:
+        draft = TaskOut(
+            title=title[:80],
+            course=course[:60] or None,
+            category=guess_category(title),
+            due_at=due,
+            location=None,
+            action=note[:200] or None,
+        )
+        created, updated = planner.plan(
+            uid, [draft], source="sheet", message_id=f"sheet-{conn['id']}-{key}", ref=ref
+        )
+    res.created += created
+    res.updated += updated
+    touched = (created + updated)[:1]
+    repo.upsert_source_item(uid, conn["id"], key, chash, touched[0].id if touched else None)
 
 
 def register() -> None:

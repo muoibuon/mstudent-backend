@@ -83,8 +83,8 @@ async def llm_map_sheet(header: list[str], samples: list[list[str]], user_id: in
     """Hiểu vai trò các cột của bảng deadline lớp (một lần / khi tiêu đề đổi). Không có tool."""
     from ..models import SheetMapping
 
-    rows = "\n".join(" | ".join(_clean(c)[:80] for c in r) for r in samples[:3])
-    head = " | ".join(f"[{i}] {_clean(h)[:60]}" for i, h in enumerate(header))
+    rows = "\n".join(" | ".join(_clean(c)[:80] for c in r[:30]) for r in samples[:3])
+    head = " | ".join(f"[{i}] {_clean(h)[:60]}" for i, h in enumerate(header[:30]))
     payload = f"<thong_bao>\nTiêu đề cột: {head}\nDòng mẫu:\n{rows}\n</thong_bao>"
     res = await run_llm(_agent("SheetMapper", "sheet_mapper_prompt", SheetMapping), payload, user_id=user_id)
     return res.final_output

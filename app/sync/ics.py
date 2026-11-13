@@ -6,6 +6,7 @@ tiếp qua planner, KHÔNG gọi AI. Khoá mỗi sự kiện = UID; hạn hoặc
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 
 import anyio
@@ -17,7 +18,7 @@ from ..connectors import lms_ics
 from ..models import TaskOut
 from ..pipeline import planner
 from . import scheduler
-from .common import ensure_public_url, guess_category, short_hash
+from .common import MAX_ITEMS_PER_RUN, MAX_ITEMS_SEEN, ensure_public_url, guess_category, short_hash
 from .scheduler import RunResult, TemporaryError
 
 MAX_BYTES = 2 * 1024 * 1024
@@ -73,7 +74,9 @@ async def run(conn: dict) -> RunResult:
         raise TemporaryError(BAD_LINK)
     ref = config.now()
     seen: set[str] = set()
-    for ev in lms_ics.parse_events(text):
+    processed = 0
+    for ev in lms_ics.parse_events(text)[:MAX_ITEMS_SEEN]:
+        await asyncio.sleep(0)  # nhường event loop: không treo máy chủ với lịch rất lớn
         title = ev["summary"].strip()
         if not title:
             continue
@@ -84,6 +87,10 @@ async def run(conn: dict) -> RunResult:
         if prev and prev["content_hash"] == chash:
             res.skipped += 1
             continue
+        if processed >= MAX_ITEMS_PER_RUN:
+            res.state["more"] = True  # còn mục chưa xử lý → lượt sau
+            continue
+        processed += 1
         if prev and prev["task_id"]:
             task = repo.get_task(uid, prev["task_id"])
             if task is None or task.status == "done":

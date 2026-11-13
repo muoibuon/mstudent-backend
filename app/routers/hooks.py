@@ -16,7 +16,7 @@ import anyio
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from .. import google_api, repo
-from ..deps import enforce
+from ..deps import client_ip, enforce
 
 router = APIRouter(prefix="/api/hooks", tags=["hooks"])
 MAX_BODY = 8 * 1024
@@ -24,7 +24,7 @@ MAX_BODY = 8 * 1024
 
 @router.post("/gmail", status_code=204)
 async def gmail_push(request: Request) -> Response:
-    enforce("hook:gmail", 120, 60)
+    enforce(f"hook:gmail:ip:{client_ip(request)}", 60, 60)  # theo IP trước khi kiểm chữ ký
     body = await request.body()
     if len(body) > MAX_BODY:
         raise HTTPException(413, "Quá lớn")
@@ -35,6 +35,7 @@ async def gmail_push(request: Request) -> Response:
         await anyio.to_thread.run_sync(google_api.verify_push_jwt, auth[7:].strip())
     except google_api.GoogleError as e:
         raise HTTPException(403, "Chữ ký không hợp lệ") from e
+    enforce("hook:gmail", 600, 60)  # toàn hệ thống, chỉ tính request đã có chữ ký Google hợp lệ
     try:
         data = json.loads(base64.b64decode(json.loads(body)["message"]["data"]))
         email = str(data.get("emailAddress", ""))[:320]

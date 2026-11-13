@@ -841,3 +841,55 @@ def test_push_failure_never_breaks_sync(client, user, monkeypatch):
     repo.upsert_push_token(uid, "ExponentPushToken[on]", "android", True)
     created, _ = planner.plan(uid, [_draft("Nộp Lab 7")], source="sheet", message_id="m", ref=REF)
     _push_run(uid, conn, created, first=False)  # không ném lỗi
+
+
+# ---------------- T049: hồi quy bảo mật ----------------
+
+
+def test_huge_calendar_is_capped_and_does_not_block_event_loop(client, user, monkeypatch):
+    import time
+
+    from app.sync import common, ics
+
+    events = "".join(
+        f"BEGIN:VEVENT\nUID:u{i}\nSUMMARY:Việc số {i}\nDTSTART:20261125T020000Z\nEND:VEVENT\n"
+        for i in range(1500)
+    )
+    feed = {"v": f"BEGIN:VCALENDAR\n{events}END:VCALENDAR\n", "etag": None}
+    uid, conn = _ics_conn(client, user, monkeypatch, feed)
+    ticks: list[float] = []
+
+    async def scenario():
+        async def ticker():
+            while True:
+                ticks.append(time.perf_counter())
+                await asyncio.sleep(0.01)
+
+        t = asyncio.create_task(ticker())
+        res = await ics.run(repo.get_connection(uid, conn["id"]))
+        t.cancel()
+        return res
+
+    res = asyncio.run(scenario())
+    assert len(res.created) <= common.MAX_ITEMS_PER_RUN and res.state.get("more") is True
+    gaps = [b - a for a, b in zip(ticks, ticks[1:], strict=False)]
+    assert gaps and max(gaps) < 1.0  # event loop vẫn chạy trong khi xử lý lịch lớn
+
+
+def test_poison_sheet_row_does_not_break_the_rest(client, user, monkeypatch):
+    poison = "x" * 9000
+    csv_text = {"v": f"Môn,Nội dung,Hạn nộp\nOOP,{poison},không rõ hạn\nINT3306,Nộp Lab 5,20/11\n"}
+    calls: list = []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, calls)
+    res = _run(conn["id"], uid)
+    assert "Nộp Lab 5" in _tasks(uid)  # dòng sau dòng hỏng vẫn được xử lý
+    assert res.state.get("mapping")  # ánh xạ cột vẫn được lưu
+
+
+def test_wide_sheet_uses_rules_not_ai(client, user, monkeypatch):
+    header = ["Môn", "Nội dung", "Hạn nộp"] + [f"c{i}" for i in range(40)]
+    csv_text = {"v": ",".join(header) + "\nOOP,Bài tập lớn,25/11\n"}
+    calls: list = []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, calls)
+    res = _run(conn["id"], uid)
+    assert calls == [] and res.mode == "offline" and "Bài tập lớn" in _tasks(uid)

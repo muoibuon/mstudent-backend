@@ -70,7 +70,7 @@ async def run_one(conn: dict) -> None:
         return
     first_run = conn.get("last_ok_at") is None
     try:
-        res = await asyncio.wait_for(runner(conn), RUN_TIMEOUT_S)
+        res = await asyncio.wait_for(runner(conn), 45 if conn["kind"] in ("ics", "sheet") else RUN_TIMEOUT_S)
     except AuthError as e:
         log.warning("Đồng bộ nguồn %s: mất quyền truy cập", conn["id"])
         repo.finish_run(conn["id"], ok=False, error=str(e), next_run_at=_later(60), disable=True)
