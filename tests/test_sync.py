@@ -625,3 +625,140 @@ def test_gmail_webhook_requires_google_signature(client, user, push_keys):
         _push(client, _signed(good, push_keys), email="la@gmail.com").status_code == 204
     )  # email lạ: vẫn 204
     assert _push(client, _signed(good, push_keys), raw="x" * 9000).status_code == 413
+
+
+# ---------------- US2: Google Classroom (T025) ----------------
+
+
+def _cw(cid, title, due=None, time=None, updated="2026-11-09T01:00:00Z"):
+    w = {"id": cid, "title": title, "updateTime": updated, "alternateLink": "https://classroom.google.com/x"}
+    if due:
+        w["dueDate"] = dict(zip(("year", "month", "day"), due, strict=True))
+    if time:
+        w["dueTime"] = dict(zip(("hours", "minutes"), time, strict=True))
+    return w
+
+
+@pytest.fixture()
+def classroom_world(client, user, monkeypatch):
+    from app import google_api, security
+    from app.pipeline import orchestrator
+
+    monkeypatch.setenv("GOOGLE_WEB_CLIENT_ID", "web")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "shh")
+    world = {
+        "snapshot": [
+            {  # lớp mới tạo → theo dõi
+                "course": {
+                    "id": "c1",
+                    "name": "INT3306 Mạng máy tính",
+                    "creationTime": "2026-10-20T00:00:00Z",
+                },
+                "coursework": [
+                    _cw("w1", "Bài tập tuần 10", (2026, 11, 21), (10, 0)),  # 17:00 giờ VN
+                    _cw("w2", "Quiz chương 4", (2026, 11, 19)),  # thiếu giờ → 23:59 VN
+                    _cw("w3", "Bài đã quá hạn lâu", (2026, 11, 1), (10, 0)),
+                    _cw("w4", "Đọc tài liệu"),  # không có hạn
+                ],
+                "submissions": [],
+                "announcements": [
+                    {
+                        "id": "a1",
+                        "text": "Thứ 6 tuần này nghỉ học, học bù thứ 7 tại P.301.",
+                        "creationTime": "2026-11-09T02:00:00Z",
+                        "updateTime": "2026-11-09T02:00:00Z",
+                    },
+                ],
+            },
+            {  # lớp cũ, không hoạt động → bỏ qua
+                "course": {"id": "c2", "name": "Lớp năm ngoái", "creationTime": "2025-09-01T00:00:00Z"},
+                "coursework": [_cw("w9", "Bài cũ", (2026, 11, 25), updated="2025-12-01T00:00:00Z")],
+                "submissions": [],
+                "announcements": [],
+            },
+        ],
+        "error": None,
+        "ingested": [],
+    }
+
+    async def fake_token(refresh):
+        return "at"
+
+    async def fake_snapshot(token):
+        if world["error"]:
+            raise world["error"]
+        return world["snapshot"]
+
+    monkeypatch.setattr(google_api, "access_token", fake_token)
+    monkeypatch.setattr(google_api, "classroom_snapshot", fake_snapshot)
+    real_ingest = orchestrator.ingest
+
+    async def counting(uid_, msg):
+        world["ingested"].append(msg.id)
+        return await real_ingest(uid_, msg)
+
+    monkeypatch.setattr(orchestrator, "ingest", counting)
+    # "Bây giờ" của dữ liệu thử nghiệm: 10/11/2026 (conftest đặt MSTUDENT_NOW); datetime.now dùng cho lọc lớp.
+    from app.sync import classroom
+
+    monkeypatch.setattr(classroom, "datetime", _FrozenDatetime)
+    uid = _uid(client, user[0])
+    repo.save_google_account(uid, "sv@gmail.com", security.encrypt("rt"), " ".join(config.CLASSROOM_SCOPES))
+    return uid, repo.create_connection(uid, "classroom", "", "sv@gmail.com")["id"], world
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 11, 10, 1, 0, tzinfo=tz)
+
+
+def _run_classroom(uid, cid):
+    from app.sync import classroom
+
+    res = asyncio.run(classroom.run(repo.get_connection(uid, cid)))
+    repo.finish_run(cid, ok=True, next_run_at="2000", state=res.state)
+    return res
+
+
+def test_classroom_structured_tasks_without_ai(classroom_world):
+    uid, cid, world = classroom_world
+    res = _run_classroom(uid, cid)
+    t = _tasks(uid)
+    assert t["Bài tập tuần 10"].due_at == "2026-11-21T17:00:00+07:00"
+    assert (
+        t["Quiz chương 4"].due_at == "2026-11-19T23:59:00+07:00"
+        and t["Quiz chương 4"].category.value == "exam"
+    )
+    assert t["Đọc tài liệu"].due_at is None
+    assert "Bài đã quá hạn lâu" not in t and "Bài cũ" not in t  # FR-075, FR-024
+    assert t["Bài tập tuần 10"].source.value == "classroom" and "INT3306" in t["Bài tập tuần 10"].course
+    assert world["ingested"] == ["classroom-ann-a1"]  # chỉ thông báo lớp qua pipeline; bài tập không qua AI
+    assert res.state["tracked_courses"] == 1
+
+    world["snapshot"][0]["coursework"][0]["dueTime"] = {"hours": 13}  # dời sang 20:00 VN
+    world["snapshot"][0]["submissions"] = [{"courseWorkId": "w2", "state": "TURNED_IN"}]
+    res = _run_classroom(uid, cid)
+    t = _tasks(uid)
+    assert t["Bài tập tuần 10"].due_at == "2026-11-21T20:00:00+07:00"
+    assert t["Quiz chương 4"].status == "done"  # đã nộp → xong (FR-021)
+    assert len([x for x in repo.list_tasks(uid, None) if x.title == "Bài tập tuần 10"]) == 1
+    assert world["ingested"] == ["classroom-ann-a1"]  # thông báo cũ không chạy lại
+
+
+def test_classroom_blocked_by_school_disables_only_classroom(classroom_world):
+    from app import google_api
+    from app.sync import classroom, scheduler
+
+    uid, cid, world = classroom_world
+    gmail_conn = repo.create_connection(
+        uid, "gmail", "", "sv@gmail.com", next_run_at="2999-01-01T00:00:00+00:00"
+    )
+    world["error"] = google_api.ClassroomBlocked(
+        "Không đọc được Google Classroom: trường của bạn có thể chặn …"
+    )
+    classroom.register()
+    asyncio.run(scheduler.tick(force=False))
+    c = repo.get_connection(uid, cid)
+    assert c["enabled"] is False and "trường" in c["last_error"]
+    assert repo.get_connection(uid, gmail_conn["id"])["enabled"] is True

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import google_api, repo, security
+from .. import config, google_api, repo, security
 from ..deps import ai_limit, client_ip, current_user, enforce
 from ..models import GmailSyncRequest, GoogleConnectRequest
 from ..pipeline import orchestrator
@@ -32,7 +32,12 @@ async def connect(body: GoogleConnectRequest, request: Request, user: dict = Dep
     )
     repo.audit("gmail_connected", user["id"], client_ip(request))
     # 002: từ giờ máy chủ tự đồng bộ (lượt đầu chạy ngay); người dùng không phải bấm gì nữa.
-    repo.create_connection(user["id"], "gmail", "", tok["email"] or user["email"])
+    granted = set(tok["scope"].split())
+    label = tok["email"] or user["email"]
+    if config.GMAIL_SCOPE in granted:
+        repo.create_connection(user["id"], "gmail", "", label)
+    if set(config.CLASSROOM_SCOPES) <= granted:
+        repo.create_connection(user["id"], "classroom", "", label)
     return {"connected": True, "email": tok["email"] or user["email"]}
 
 

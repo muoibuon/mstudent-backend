@@ -93,8 +93,9 @@ async def exchange_code(server_auth_code: str) -> dict:
     data = r.json()
     if not data.get("refresh_token"):
         raise GoogleError("Google không trả refresh token — hãy ngắt kết nối rồi cấp quyền lại")
-    if config.GMAIL_SCOPE not in data.get("scope", "").split():
-        raise GoogleError("Chưa cấp quyền đọc Gmail")
+    granted = set(data.get("scope", "").split())
+    if config.GMAIL_SCOPE not in granted and not set(config.CLASSROOM_SCOPES) <= granted:
+        raise GoogleError("Chưa cấp quyền đọc Gmail hoặc Google Classroom")
     email = ""
     if data.get("id_token"):
         # Token nhận trực tiếp từ Google qua TLS nên không cần kiểm chữ ký lần nữa.
@@ -281,3 +282,62 @@ def verify_push_jwt(token: str) -> dict:
     if str(claims.get("email", "")).lower() != sa or claims.get("email_verified") not in (True, "true"):
         raise GoogleError("Webhook không đến từ service account đã cấu hình")
     return claims
+
+
+# ---------------- Google Classroom (002 US2) ----------------
+
+CLASSROOM_URL = "https://classroom.googleapis.com/v1"
+
+
+class ClassroomBlocked(GoogleError):
+    """Trường / tổ chức chặn ứng dụng bên ngoài truy cập Classroom (403 không phải do token)."""
+
+
+async def _classroom_get(
+    c: httpx.AsyncClient, token: str, path: str, params: dict, key: str, max_pages: int = 5
+) -> list[dict]:
+    out: list[dict] = []
+    page = None
+    for _ in range(max_pages):
+        q = {**params, **({"pageToken": page} if page else {})}
+        r = await c.get(f"{CLASSROOM_URL}{path}", params=q, headers={"Authorization": f"Bearer {token}"})
+        if r.status_code == 401:
+            raise AuthRevoked("Google từ chối quyền đọc Classroom — hãy kết nối lại")
+        if r.status_code == 403:
+            raise ClassroomBlocked(
+                "Không đọc được Google Classroom: trường của bạn có thể chặn ứng dụng bên ngoài, "
+                "hoặc chưa cấp quyền Classroom. Gmail và các nguồn khác vẫn hoạt động."
+            )
+        if r.status_code != 200:
+            raise GoogleError(f"Classroom trả lỗi {r.status_code}, sẽ thử lại")
+        data = r.json()
+        out += data.get(key, [])
+        page = data.get("nextPageToken")
+        if not page:
+            break
+    return out
+
+
+async def classroom_snapshot(token: str, max_courses: int = 30) -> list[dict]:
+    """Mỗi lớp đang học: {course, coursework, submissions, announcements} (chỉ các trường cần dùng)."""
+    async with _client() as c:
+        courses = await _classroom_get(
+            c, token, "/courses", {"studentId": "me", "courseStates": "ACTIVE", "pageSize": 100}, "courses"
+        )
+        out = []
+        for co in courses[:max_courses]:
+            cid = co["id"]
+            work = await _classroom_get(
+                c, token, f"/courses/{cid}/courseWork",
+                {"courseWorkStates": "PUBLISHED", "orderBy": "updateTime desc", "pageSize": 50}, "courseWork", 2,
+            )  # fmt: skip
+            subs = await _classroom_get(
+                c, token, f"/courses/{cid}/courseWork/-/studentSubmissions",
+                {"userId": "me", "pageSize": 100}, "studentSubmissions",
+            )  # fmt: skip
+            anns = await _classroom_get(
+                c, token, f"/courses/{cid}/announcements",
+                {"orderBy": "updateTime desc", "pageSize": 20}, "announcements", 1,
+            )  # fmt: skip
+            out.append({"course": co, "coursework": work, "submissions": subs, "announcements": anns})
+        return out

@@ -178,3 +178,22 @@ def test_connect_creates_auto_gmail_source_and_disconnect_removes_it(client, goo
     )  # dùng nút ngắt Google
     client.delete("/api/google/disconnect", headers=h)
     assert client.get("/api/sources", headers=h).json() == []
+
+
+def test_connect_with_classroom_scopes_creates_classroom_source(client, google, monkeypatch):
+    real_post = httpx.AsyncClient.post
+
+    async def classroom_only(self, url, *a, **kw):
+        r = await real_post(self, url, *a, **kw)
+        if str(url).startswith(google_api.TOKEN_URL) and r.status_code == 200:
+            data = r.json() | {"scope": "openid " + " ".join(config.CLASSROOM_SCOPES)}
+            return httpx.Response(200, json=data)
+        return r
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", classroom_only)
+    h = auth(signup(client))
+    assert (
+        client.post("/api/google/connect", json={"server_auth_code": "good-code"}, headers=h).status_code
+        == 200
+    )
+    assert [s["kind"] for s in client.get("/api/sources", headers=h).json()] == ["classroom"]

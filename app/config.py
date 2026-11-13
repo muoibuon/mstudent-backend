@@ -39,6 +39,12 @@ REFRESH_REUSE_GRACE_S = int(os.getenv("MSTUDENT_REFRESH_GRACE_S", "30"))
 MAX_BODY_BYTES = 256 * 1024
 
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+# Google Classroom chỉ đọc (002 US2): danh sách lớp, bài tập + bài nộp của chính mình, thông báo lớp.
+CLASSROOM_SCOPES = (
+    "https://www.googleapis.com/auth/classroom.courses.readonly",
+    "https://www.googleapis.com/auth/classroom.coursework.me.readonly",
+    "https://www.googleapis.com/auth/classroom.announcements.readonly",
+)
 
 
 def is_prod() -> bool:
