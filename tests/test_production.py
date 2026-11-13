@@ -16,6 +16,7 @@ def _prod_env(monkeypatch, **override):
         "OPENAI_API_KEY": "sk-test-value-should-never-be-printed",
         "MSTUDENT_ADMIN_EMAILS": "admin@vju.ac.vn",
         "MSTUDENT_NOW": None,
+        "MSTUDENT_OFFLINE": None,
     }
     env.update(override)
     for k, v in env.items():
@@ -57,6 +58,20 @@ def test_prod_config_names_missing_variable_without_leaking_values(monkeypatch, 
     assert SECRET not in msg
     assert "sk-test-value" not in msg
     assert "too-short" not in msg
+
+
+def test_prod_config_allows_missing_openai_key_in_forced_offline_mode(monkeypatch):
+    _prod_env(monkeypatch, OPENAI_API_KEY=None, MSTUDENT_OFFLINE="1")
+    config.check_prod_config()
+    assert not config.llm_enabled()
+
+
+def test_prod_config_offline_mode_still_requires_other_secrets(monkeypatch):
+    _prod_env(monkeypatch, OPENAI_API_KEY=None, MSTUDENT_OFFLINE="1", MSTUDENT_ADMIN_EMAILS=None)
+    with pytest.raises(RuntimeError) as e:
+        config.check_prod_config()
+    assert "MSTUDENT_ADMIN_EMAILS" in str(e.value)
+    assert "OPENAI_API_KEY" not in str(e.value)
 
 
 # ---------------- client_ip ----------------

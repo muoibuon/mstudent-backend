@@ -187,8 +187,8 @@ def check_prod_config() -> None:
     problems: list[str] = []
     if len(os.getenv("MSTUDENT_SECRET_KEY", "")) < 32:
         problems.append("MSTUDENT_SECRET_KEY (cần >= 32 ký tự)")
-    if not os.getenv("OPENAI_API_KEY"):
-        problems.append("OPENAI_API_KEY")
+    if not os.getenv("OPENAI_API_KEY") and not is_offline_forced():
+        problems.append("OPENAI_API_KEY (hoặc đặt MSTUDENT_OFFLINE=1 để chạy bộ luật, không dùng AI)")
     if not admin_emails():
         problems.append("MSTUDENT_ADMIN_EMAILS")
     if os.getenv("MSTUDENT_NOW"):

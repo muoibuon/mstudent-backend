@@ -47,9 +47,8 @@ systemctl daemon-reload
 systemctl enable -q mstudent mstudent-backup.timer
 
 missing=""
-for name in OPENAI_API_KEY MSTUDENT_ADMIN_EMAILS; do
-  grep -Eq "^$name=.+" "$ENV_FILE" || missing="$missing $name"
-done
+grep -Eq "^MSTUDENT_ADMIN_EMAILS=.+" "$ENV_FILE" || missing="$missing MSTUDENT_ADMIN_EMAILS"
+grep -Eq "^(OPENAI_API_KEY=.+|MSTUDENT_OFFLINE=1)" "$ENV_FILE" || missing="$missing OPENAI_API_KEY(hoặc MSTUDENT_OFFLINE=1)"
 if [ -n "$missing" ]; then
   echo
   echo "!! Chưa khởi động: còn thiếu trong $ENV_FILE:$missing"
