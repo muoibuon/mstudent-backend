@@ -158,6 +158,12 @@ def google_account(user_id: int) -> dict | None:
     return _one("SELECT * FROM google_accounts WHERE user_id=?", (user_id,))
 
 
+def google_user_by_email(email: str) -> int | None:
+    """Webhook Gmail chỉ có địa chỉ email → tìm người dùng đã kết nối hộp thư đó."""
+    r = _one("SELECT user_id FROM google_accounts WHERE email=?", (email.lower(),))
+    return r["user_id"] if r else None
+
+
 def touch_google_sync(user_id: int) -> None:
     with connect() as c:
         c.execute("UPDATE google_accounts SET last_sync_at=? WHERE user_id=?", (_iso(), user_id))

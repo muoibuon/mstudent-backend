@@ -166,3 +166,15 @@ def test_public_config(client, google):
     c = client.get("/api/public-config").json()
     assert c["google"]["enabled"] and c["google"]["web_client_id"].endswith("googleusercontent.com")
     assert "secret" not in str(c).lower() and "shh" not in str(c)
+
+
+def test_connect_creates_auto_gmail_source_and_disconnect_removes_it(client, google):
+    h = auth(signup(client))
+    client.post("/api/google/connect", json={"server_auth_code": "good-code"}, headers=h)
+    sources = client.get("/api/sources", headers=h).json()
+    assert [s["kind"] for s in sources] == ["gmail"] and sources[0]["enabled"] is True
+    assert (
+        client.delete(f"/api/sources/{sources[0]['id']}", headers=h).status_code == 400
+    )  # dùng nút ngắt Google
+    client.delete("/api/google/disconnect", headers=h)
+    assert client.get("/api/sources", headers=h).json() == []

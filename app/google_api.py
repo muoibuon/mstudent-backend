@@ -33,6 +33,14 @@ class GoogleError(Exception):
     """Lỗi có thể hiển thị cho người dùng."""
 
 
+class AuthRevoked(GoogleError):
+    """Refresh token hết hạn / bị thu hồi / thiếu quyền → người dùng phải kết nối lại."""
+
+
+class HistoryExpired(GoogleError):
+    """startHistoryId quá cũ (Gmail chỉ giữ lịch sử khoảng 1 tuần) → quét lại theo ngày."""
+
+
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=20, transport=_transport)
 
@@ -106,7 +114,13 @@ async def access_token(refresh_token: str) -> str:
             },
         )
     if r.status_code != 200:
-        raise GoogleError("Quyền truy cập Gmail đã hết hạn hoặc bị thu hồi — hãy kết nối lại")
+        try:
+            err = r.json().get("error", "")
+        except ValueError:
+            err = ""
+        if r.status_code in (400, 401) and err in ("invalid_grant", "unauthorized_client"):
+            raise AuthRevoked("Quyền truy cập Google đã hết hạn hoặc bị thu hồi — hãy kết nối lại")
+        raise GoogleError("Google tạm thời không cấp quyền truy cập, sẽ thử lại")
     return r.json()["access_token"]
 
 
@@ -187,3 +201,83 @@ async def get_message(token: str, gmail_id: str) -> Message:
     if r.status_code != 200:
         raise GoogleError(f"Gmail trả lỗi {r.status_code} khi đọc thư")
     return parse_gmail(r.json())
+
+
+# ---------------- Đồng bộ tự động (002) ----------------
+
+SKIP_LABELS = {"CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "SPAM", "TRASH", "DRAFT", "SENT"}
+
+
+def _check(r: httpx.Response, what: str) -> None:
+    if r.status_code in (401, 403):
+        raise AuthRevoked("Google từ chối quyền đọc — hãy kết nối lại")
+    if r.status_code != 200:
+        raise GoogleError(f"Gmail trả lỗi {r.status_code} khi {what}")
+
+
+async def get_history_id(token: str) -> str:
+    async with _client() as c:
+        r = await c.get(f"{GMAIL_URL}/profile", headers={"Authorization": f"Bearer {token}"})
+    _check(r, "đọc hồ sơ")
+    return str(r.json()["historyId"])
+
+
+async def history_message_ids(token: str, start_history_id: str) -> tuple[list[str], str]:
+    """Thư mới vào INBOX kể từ start_history_id (bỏ Quảng cáo/Mạng xã hội/Spam). Trả (ids, historyId mới)."""
+    ids: list[str] = []
+    latest = start_history_id
+    page = None
+    async with _client() as c:
+        for _ in range(5):  # tối đa 5 trang × 100
+            params = {"startHistoryId": start_history_id, "historyTypes": "messageAdded", "labelId": "INBOX",
+                      "maxResults": 100}  # fmt: skip
+            if page:
+                params["pageToken"] = page
+            r = await c.get(
+                f"{GMAIL_URL}/history", params=params, headers={"Authorization": f"Bearer {token}"}
+            )
+            if r.status_code == 404:
+                raise HistoryExpired("Lịch sử Gmail đã quá cũ")
+            _check(r, "đọc lịch sử")
+            data = r.json()
+            latest = str(data.get("historyId", latest))
+            for h in data.get("history", []):
+                for added in h.get("messagesAdded", []):
+                    m = added.get("message", {})
+                    labels = set(m.get("labelIds", []))
+                    if "INBOX" in labels and not labels & SKIP_LABELS and m.get("id") not in ids:
+                        ids.append(m["id"])
+            page = data.get("nextPageToken")
+            if not page:
+                break
+    return ids, latest
+
+
+async def watch(token: str, topic: str) -> int:
+    """Đăng ký Gmail báo vào Pub/Sub khi INBOX thay đổi. Trả thời điểm hết hạn (ms epoch, khoảng 7 ngày)."""
+    async with _client() as c:
+        r = await c.post(
+            f"{GMAIL_URL}/watch",
+            json={"topicName": topic, "labelIds": ["INBOX"], "labelFilterBehavior": "include"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _check(r, "đăng ký báo ngay")
+    return int(r.json().get("expiration", 0))
+
+
+def verify_push_jwt(token: str) -> dict:
+    """Kiểm JWT do Google ký khi Pub/Sub gọi webhook: chữ ký, iss, aud = URL webhook, email = service account."""
+    aud, sa = config.public_url() + "/api/hooks/gmail", config.pubsub_push_sa()
+    if not (config.public_url() and sa):
+        raise GoogleError("Webhook chưa được cấu hình")
+    try:
+        key = _jwks.get_signing_key_from_jwt(token).key
+        claims = jwt.decode(
+            token, key, algorithms=["RS256"], audience=aud, issuer=ISSUERS,
+            options={"require": ["exp", "iat", "aud", "iss", "email"]},
+        )  # fmt: skip
+    except jwt.PyJWTError as e:
+        raise GoogleError("Chữ ký webhook không hợp lệ") from e
+    if str(claims.get("email", "")).lower() != sa or claims.get("email_verified") not in (True, "true"):
+        raise GoogleError("Webhook không đến từ service account đã cấu hình")
+    return claims

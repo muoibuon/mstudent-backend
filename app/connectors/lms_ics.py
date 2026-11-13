@@ -30,6 +30,33 @@ def _parse_dt(value: str) -> str:
     return dt.astimezone(TZ).isoformat()
 
 
+def parse_events(text: str) -> list[dict]:
+    """Sự kiện có cấu trúc: uid, summary, course (CATEGORIES), due (ISO +07:00, DTEND hoặc DTSTART), description."""
+    out, ev = [], None
+    for line in _unfold(text):
+        if line == "BEGIN:VEVENT":
+            ev = {}
+        elif line == "END:VEVENT" and ev is not None:
+            out.append(
+                {
+                    "uid": ev.get("UID", "")[:200],
+                    "summary": ev.get("SUMMARY", "").replace("\\,", ",")[:300],
+                    "course": ev.get("CATEGORIES", "")[:100],
+                    "due": ev.get("DTEND") or ev.get("DTSTART"),
+                    "description": ev.get("DESCRIPTION", "").replace("\\n", "\n")[:2000],
+                }
+            )
+            ev = None
+        elif ev is not None and ":" in line:
+            key, _, val = line.partition(":")
+            name = key.split(";")[0]
+            try:
+                ev[name] = _parse_dt(line) if name in ("DTSTART", "DTEND") else val
+            except ValueError:
+                continue
+    return out
+
+
 def parse_ics(text: str) -> list[Message]:
     msgs, ev = [], None
     for line in _unfold(text):

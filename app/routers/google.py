@@ -31,6 +31,8 @@ async def connect(body: GoogleConnectRequest, request: Request, user: dict = Dep
         user["id"], tok["email"] or user["email"], security.encrypt(tok["refresh_token"]), tok["scope"]
     )
     repo.audit("gmail_connected", user["id"], client_ip(request))
+    # 002: từ giờ máy chủ tự đồng bộ (lượt đầu chạy ngay); người dùng không phải bấm gì nữa.
+    repo.create_connection(user["id"], "gmail", "", tok["email"] or user["email"])
     return {"connected": True, "email": tok["email"] or user["email"]}
 
 
@@ -75,5 +77,6 @@ async def disconnect(request: Request, user: dict = Depends(current_user)):
         if token:
             await google_api.revoke(token)
         repo.delete_google_account(user["id"])
+        repo.delete_connections_of_kind(user["id"], ("gmail", "classroom"))
         repo.audit("gmail_disconnected", user["id"], client_ip(request))
     return {"connected": False}

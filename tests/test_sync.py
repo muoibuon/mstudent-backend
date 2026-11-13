@@ -353,3 +353,275 @@ def test_sheet_private_link_rejected_on_add(client, user, monkeypatch):
     assert r.status_code == 400 and "chia sẻ" in r.json()["detail"]
     r = client.post("/api/sources", json={"kind": "sheet", "url": "https://evil.com/x"}, headers=user[0])
     assert r.status_code == 400
+
+
+# ---------------- US1: Lịch LMS (.ics) tự động (T017) ----------------
+
+ICS_V1 = """BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:ev1@moodle
+SUMMARY:Nộp báo cáo Lab 6
+CATEGORIES:INT3306
+DTSTART:20261120T165900Z
+END:VEVENT
+BEGIN:VEVENT
+UID:ev2@moodle
+SUMMARY:Quiz chương 4
+CATEGORIES:MAT1101
+DTSTART:20261118T020000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:old@moodle
+SUMMARY:Bài cũ
+DTSTART:20261101T020000Z
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+def _ics_conn(client, user, monkeypatch, feed: dict):
+    from app.sync import ics
+
+    async def fake_fetch(url, etag):
+        if etag and etag == feed.get("etag"):
+            return 304, "", etag
+        return 200, feed["v"], feed.get("etag")
+
+    monkeypatch.setattr(ics, "fetch", fake_fetch)
+    uid = _uid(client, user[0])
+    return uid, repo.create_connection(uid, "ics", "https://lms.example.edu/export.ics", "Moodle")
+
+
+def _run_ics(conn_id, uid, save=True):
+    from app.sync import ics
+
+    res = asyncio.run(ics.run(repo.get_connection(uid, conn_id)))
+    if save:
+        repo.finish_run(conn_id, ok=True, next_run_at="2000", cursor=res.cursor, state=res.state)
+    return res
+
+
+def test_ics_runner_structured_no_ai_and_updates(client, user, monkeypatch):
+    feed = {"v": ICS_V1, "etag": '"v1"'}
+    uid, conn = _ics_conn(client, user, monkeypatch, feed)
+    res = _run_ics(conn["id"], uid)
+    t = _tasks(uid)
+    assert set(t) == {"Nộp báo cáo Lab 6", "Quiz chương 4"}  # sự kiện đã qua > 1 ngày bị bỏ (FR-075)
+    assert (
+        t["Nộp báo cáo Lab 6"].due_at == "2026-11-20T23:59:00+07:00"
+        and t["Nộp báo cáo Lab 6"].course == "INT3306"
+    )
+    assert t["Quiz chương 4"].category.value == "exam" and t["Nộp báo cáo Lab 6"].sources == ["lms"]
+    assert res.mode == "structured"
+
+    res = _run_ics(conn["id"], uid)  # ETag không đổi → 304, không làm gì
+    assert res.created == [] and res.updated == []
+
+    feed.update(v=ICS_V1.replace("20261120T165900Z", "20261122T165900Z"), etag='"v2"')
+    res = _run_ics(conn["id"], uid)
+    t = _tasks(uid)
+    assert len(res.updated) == 1 and res.created == []
+    assert t["Nộp báo cáo Lab 6"].due_at.startswith("2026-11-22")
+    assert len([x for x in repo.list_tasks(uid, None) if x.title == "Nộp báo cáo Lab 6"]) == 1
+
+
+def test_ics_probe_rejects_bad_links(client, user, monkeypatch):
+    from app.sync import ics
+
+    async def not_calendar(url, etag):
+        return 200, "<html>login</html>", None
+
+    real_check = ics._ensure_public_url
+    monkeypatch.setattr(ics, "fetch", not_calendar)
+    monkeypatch.setattr(ics, "_ensure_public_url", lambda url: None)
+    r = client.post("/api/sources", json={"kind": "ics", "url": "https://lms.example.edu/x"}, headers=user[0])
+    assert r.status_code == 400 and "xuất lịch" in r.json()["detail"].lower()
+    monkeypatch.setattr(ics, "_ensure_public_url", real_check)  # kiểm IP thật → chặn địa chỉ nội bộ
+    r = client.post(
+        "/api/sources", json={"kind": "ics", "url": "http://127.0.0.1:8000/x.ics"}, headers=user[0]
+    )
+    assert r.status_code == 400
+
+
+# ---------------- US1: Gmail tự động + webhook báo ngay (T015, T016) ----------------
+
+
+def _gmail_mail(mid, subject, body):
+    import base64 as b64
+
+    data = b64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+    return {
+        "id": mid,
+        "internalDate": "1794272400000",
+        "snippet": body[:20],
+        "payload": {
+            "mimeType": "text/plain",
+            "headers": [
+                {"name": "From", "value": "Thầy A <a@vju.ac.vn>"},
+                {"name": "Subject", "value": subject},
+            ],
+            "body": {"data": data},
+        },
+    }
+
+
+@pytest.fixture()
+def gmail_world(client, user, monkeypatch):
+    """Hộp thư giả + đếm số thư đi qua pipeline. Trả (uid, conn_id, world)."""
+    from app import google_api, security
+    from app.pipeline import orchestrator
+
+    monkeypatch.setenv("GOOGLE_WEB_CLIENT_ID", "web")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "shh")
+    world = {
+        "list": ["m1"],
+        "history": {"historyId": "105", "history": []},
+        "token_error": None,
+        "ingested": [],
+    }
+    mails = {
+        "m1": _gmail_mail("m1", "[INT3306] Lab 5", "Nộp báo cáo Lab 5 trước 23h59 ngày 20/11."),
+        "m4": _gmail_mail("m4", "[MAT1101] Bài tập", "Nộp bài tập chương 3 trước 17h ngày 21/11."),
+    }
+
+    def handler(req):
+        url = str(req.url).split("?")[0]
+        if url.startswith(google_api.TOKEN_URL):
+            if world["token_error"]:
+                return httpx.Response(400, json={"error": world["token_error"]})
+            return httpx.Response(200, json={"access_token": "at"})
+        if url.endswith("/profile"):
+            return httpx.Response(200, json={"historyId": "100"})
+        if url.endswith("/history"):
+            h = world["history"]
+            return httpx.Response(404, json={}) if h == 404 else httpx.Response(200, json=h)
+        if url.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": i} for i in world["list"]]})
+        return httpx.Response(200, json=mails[url.rsplit("/", 1)[1]])
+
+    monkeypatch.setattr(google_api, "_transport", httpx.MockTransport(handler))
+    real_ingest = orchestrator.ingest
+
+    async def counting_ingest(uid_, msg):
+        world["ingested"].append((uid_, msg.id))
+        return await real_ingest(uid_, msg)
+
+    monkeypatch.setattr(orchestrator, "ingest", counting_ingest)
+    uid = _uid(client, user[0])
+    repo.save_google_account(uid, "sv@gmail.com", security.encrypt("rt"), config.GMAIL_SCOPE)
+    conn = repo.create_connection(uid, "gmail", "", "sv@gmail.com")
+    return uid, conn["id"], world
+
+
+def _run_gmail(uid, conn_id):
+    from app.sync import gmail
+
+    res = asyncio.run(gmail.run(repo.get_connection(uid, conn_id)))
+    repo.finish_run(conn_id, ok=True, next_run_at="2000", cursor=res.cursor, state=res.state)
+    return res
+
+
+def test_gmail_runner_incremental(gmail_world):
+    uid, cid, world = gmail_world
+    res = _run_gmail(uid, cid)  # lần đầu: liệt kê 7 ngày, lưu historyId
+    assert world["ingested"] == [(uid, "gmail-m1")] and res.cursor == "100" and len(res.created) == 1
+
+    res = _run_gmail(uid, cid)  # không có thư mới → 0 thư qua pipeline (0 lượt AI)
+    assert len(world["ingested"]) == 1 and res.cursor == "105" and res.created == []
+
+    world["history"] = {
+        "historyId": "110",
+        "history": [
+            {"messagesAdded": [{"message": {"id": "m3", "labelIds": ["INBOX", "CATEGORY_PROMOTIONS"]}}]},
+            {"messagesAdded": [{"message": {"id": "m4", "labelIds": ["INBOX", "UNREAD"]}}]},
+            {"messagesAdded": [{"message": {"id": "m1", "labelIds": ["INBOX"]}}]},  # đã xử lý → bỏ
+        ],
+    }
+    res = _run_gmail(uid, cid)
+    assert world["ingested"][1:] == [(uid, "gmail-m4")] and res.cursor == "110" and res.skipped == 1
+
+    world["history"], world["list"] = 404, ["m4"]  # historyId quá cũ → quét lại 1 ngày
+    res = _run_gmail(uid, cid)
+    assert len(world["ingested"]) == 2 and res.cursor == "100"
+
+
+def test_gmail_runner_revoked_token_disables(gmail_world):
+    from app.sync import gmail, scheduler
+
+    uid, cid, world = gmail_world
+    world["token_error"] = "invalid_grant"
+    with pytest.raises(scheduler.AuthError, match="kết nối lại Gmail"):
+        asyncio.run(gmail.run(repo.get_connection(uid, cid)))
+    gmail.register()
+    asyncio.run(scheduler.tick(force=True))
+    c = repo.get_connection(uid, cid)
+    assert c["enabled"] is False and "kết nối lại Gmail" in c["last_error"]
+
+
+def _signed(claims: dict, key):
+    import jwt
+
+    return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "k1"})
+
+
+@pytest.fixture()
+def push_keys(monkeypatch):
+    from types import SimpleNamespace
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from app import google_api
+
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setenv("MSTUDENT_PUBLIC_URL", "https://mst.example.ts.net")
+    monkeypatch.setenv("MSTUDENT_PUBSUB_PUSH_SA", "push@proj.iam.gserviceaccount.com")
+    monkeypatch.setattr(
+        google_api._jwks, "get_signing_key_from_jwt", lambda tok: SimpleNamespace(key=priv.public_key())
+    )
+    return priv
+
+
+def _push(client, token, email="sv@gmail.com", raw=None):
+    import base64 as b64
+    import json
+
+    data = b64.b64encode(json.dumps({"emailAddress": email, "historyId": "999"}).encode()).decode()
+    body = raw if raw is not None else json.dumps({"message": {"data": data}, "subscription": "s"})
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return client.post(
+        "/api/hooks/gmail", content=body, headers={**headers, "content-type": "application/json"}
+    )
+
+
+def test_gmail_webhook_requires_google_signature(client, user, push_keys):
+    import time
+
+    uid = _uid(client, user[0])
+    from app import security
+
+    repo.save_google_account(uid, "sv@gmail.com", security.encrypt("rt"), config.GMAIL_SCOPE)
+    conn = repo.create_connection(uid, "gmail", "", "sv@gmail.com", next_run_at="2999-01-01T00:00:00+00:00")
+    now = int(time.time())
+    good = {
+        "iss": "https://accounts.google.com", "aud": "https://mst.example.ts.net/api/hooks/gmail",
+        "email": "push@proj.iam.gserviceaccount.com", "email_verified": True, "iat": now, "exp": now + 300,
+    }  # fmt: skip
+
+    assert _push(client, None).status_code == 403
+    assert _push(client, "not-a-jwt").status_code == 403
+    assert (
+        _push(client, _signed({**good, "aud": "https://evil/api/hooks/gmail"}, push_keys)).status_code == 403
+    )
+    assert (
+        _push(client, _signed({**good, "email": "attacker@x.iam.gserviceaccount.com"}, push_keys)).status_code
+        == 403
+    )
+    assert repo.get_connection(uid, conn["id"])["next_run_at"].startswith("2999")
+
+    assert _push(client, _signed(good, push_keys)).status_code == 204
+    assert not repo.get_connection(uid, conn["id"])["next_run_at"].startswith("2999")  # chạy ngay
+    assert (
+        _push(client, _signed(good, push_keys), email="la@gmail.com").status_code == 204
+    )  # email lạ: vẫn 204
+    assert _push(client, _signed(good, push_keys), raw="x" * 9000).status_code == 413

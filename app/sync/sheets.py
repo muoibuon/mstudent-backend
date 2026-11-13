@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import ipaddress
 import re
@@ -23,9 +22,10 @@ import httpx
 from fastapi import HTTPException
 
 from .. import budget, config, repo
-from ..models import Category, Message, SheetMapping, Source, TaskOut
+from ..models import Message, SheetMapping, Source, TaskOut
 from ..pipeline import llm_agents, orchestrator, planner
 from . import scheduler
+from .common import guess_category, short_hash
 from .scheduler import RunResult
 
 MAX_BYTES = 1_000_000
@@ -233,18 +233,9 @@ def parse_due(text: str, ref: datetime) -> str | None:
 # ---------------- Đồng bộ ----------------
 
 
-def _h(*parts: str) -> str:
-    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:16]
-
-
 def _cell(row: list[str], mapping: dict[str, int], role: str) -> str:
     i = mapping.get(role)
     return row[i].strip() if i is not None and i < len(row) else ""
-
-
-def _category(title: str) -> Category:
-    t = planner.fold(title)
-    return Category.exam if re.search(r"\b(thi|kiem tra|quiz|midterm|final)\b", t) else Category.deadline
 
 
 async def run(conn: dict) -> RunResult:
@@ -256,7 +247,7 @@ async def run(conn: dict) -> RunResult:
     res = RunResult(state=state, mode="structured")
     if not header:
         return res
-    header_hash = _h(*header)
+    header_hash = short_hash(*header)
     if state.get("header_hash") != header_hash or not state.get("mapping"):
         mapping, used = await map_columns(header, rows[:3], uid)
         state.update(header_hash=header_hash, mapping=mapping)
@@ -269,8 +260,8 @@ async def run(conn: dict) -> RunResult:
         title, course = _cell(row, mapping, "title"), _cell(row, mapping, "course")
         if not title:
             continue
-        key = _h(planner.fold(course), planner.fold(title))
-        chash = _h(*row)
+        key = short_hash(planner.fold(course), planner.fold(title))
+        chash = short_hash(*row)
         seen.add(key)
         prev = repo.get_source_item(conn["id"], key)
         if prev and prev["content_hash"] == chash:
@@ -308,7 +299,7 @@ async def run(conn: dict) -> RunResult:
             draft = TaskOut(
                 title=title[:80],
                 course=course[:60] or None,
-                category=_category(title),
+                category=guess_category(title),
                 due_at=due,
                 location=None,
                 action=note[:200] or None,

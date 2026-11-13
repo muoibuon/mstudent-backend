@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import agent_config, config
-from .routers import auth, core, google, sources
+from .routers import auth, core, google, hooks, sources
 from .sync import scheduler
 
 ROOT = Path(__file__).resolve().parent
@@ -74,6 +74,7 @@ app.include_router(auth.router)
 app.include_router(core.router)
 app.include_router(google.router)
 app.include_router(sources.router)
+app.include_router(hooks.router)
 
 
 @app.get("/api/health", tags=["public"])
