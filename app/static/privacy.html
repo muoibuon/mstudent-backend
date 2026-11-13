@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MStudent — Chính sách quyền riêng tư</title>
+<style>
+  body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1c1c1e; background: #fff;
+         max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  h2 { font-size: 1.15rem; margin-top: 28px; }
+  .muted { color: #6b6b70; font-size: .9rem; }
+  li { margin: 6px 0; }
+  @media (prefers-color-scheme: dark) { body { color: #f2f2f7; background: #111113; } .muted { color: #a1a1a8; } }
+</style>
+</head>
+<body>
+<h1>Chính sách quyền riêng tư</h1>
+<p class="muted">MStudent · Cập nhật ngày 13/11/2026</p>
+
+<p>MStudent là trợ lý giúp sinh viên biến thông báo từ email, LMS và nhóm lớp thành việc cần làm có hạn và nhắc
+việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào việc gì và bạn kiểm soát nó ra sao.</p>
+
+<h2>1. Dữ liệu ứng dụng thu thập</h2>
+<ul>
+  <li><strong>Tài khoản:</strong> email, tên hiển thị. Mật khẩu chỉ được lưu dưới dạng băm (Argon2id), chúng
+      tôi không đọc được mật khẩu của bạn.</li>
+  <li><strong>Gmail (chỉ khi bạn bấm kết nối):</strong> quyền <em>chỉ đọc</em>. Ứng dụng đọc tiêu đề, người
+      gửi và nội dung thư gần đây để tìm thông báo học tập. Ứng dụng không gửi, sửa hay xoá thư.</li>
+  <li><strong>Lịch LMS:</strong> đường dẫn lịch (.ics) do bạn nhập và các sự kiện trong đó.</li>
+  <li><strong>Tin nhắn Zalo và nội dung bạn dán vào:</strong> chỉ những gì bạn chủ động chia sẻ vào ứng dụng.</li>
+  <li><strong>Việc cần làm</strong> được tạo ra từ các nguồn trên, và nhật ký xử lý tương ứng.</li>
+</ul>
+
+<h2>2. Dữ liệu được dùng để làm gì</h2>
+<ul>
+  <li>Lọc tin nhiễu, rút ra việc cần làm, hạn nộp và mức ưu tiên; nhắc việc; trả lời câu hỏi của bạn trong
+      mục Trợ lý.</li>
+  <li>Thống kê tổng hợp không gắn với cá nhân (số người dùng, số thông báo đã xử lý) để cải thiện sản phẩm.</li>
+  <li>Chúng tôi không bán dữ liệu, không dùng cho quảng cáo.</li>
+</ul>
+
+<h2>3. Dữ liệu được gửi tới đâu</h2>
+<ul>
+  <li><strong>Nhà cung cấp mô hình AI (OpenAI):</strong> nội dung thông báo và câu hỏi của bạn được gửi tới
+      OpenAI qua API để phân tích. Khi AI không khả dụng, ứng dụng xử lý bằng bộ luật ngay trên máy chủ và ghi
+      rõ là "offline".</li>
+  <li><strong>Google:</strong> chỉ để đăng nhập và đọc Gmail theo quyền bạn cấp.</li>
+  <li>Ngoài hai bên trên, dữ liệu không được chia sẻ cho bên thứ ba nào.</li>
+</ul>
+
+<h2>4. Lưu trữ và bảo mật</h2>
+<ul>
+  <li>Dữ liệu lưu trên máy chủ do nhóm phát triển quản lý; mọi kết nối giữa ứng dụng và máy chủ đều được mã
+      hoá (HTTPS).</li>
+  <li>Dữ liệu của mỗi người dùng được tách riêng; người dùng khác không xem được dữ liệu của bạn.</li>
+  <li>Mã truy cập Gmail được mã hoá trước khi lưu. Nhật ký hệ thống không ghi mật khẩu, mã truy cập hay nội
+      dung thông báo.</li>
+  <li>Máy chủ được sao lưu hằng ngày; bản sao lưu được giữ tối đa 7 ngày.</li>
+</ul>
+
+<h2>5. Quyền của bạn</h2>
+<ul>
+  <li><strong>Ngắt kết nối Gmail</strong> bất cứ lúc nào trong phần Cài đặt của ứng dụng, hoặc tại
+      trang quản lý quyền truy cập trong tài khoản Google của bạn.</li>
+  <li><strong>Xoá tài khoản</strong> trong phần Cài đặt: toàn bộ việc, thông báo, nhật ký xử lý và mã truy cập
+      của bạn bị xoá khỏi máy chủ ngay lập tức, và khỏi các bản sao lưu sau tối đa 7 ngày.</li>
+</ul>
+
+<h2>6. Việc dùng dữ liệu từ Google</h2>
+<p>Việc MStudent sử dụng thông tin nhận được từ các API của Google tuân thủ Chính sách dữ liệu người dùng của
+Dịch vụ API Google, bao gồm các yêu cầu về Sử dụng hạn chế. Dữ liệu Gmail chỉ được dùng để cung cấp tính năng
+tạo việc cần làm cho chính bạn.</p>
+
+<h2>7. Liên hệ</h2>
+<p>MStudent đang trong giai đoạn thử nghiệm. Câu hỏi về quyền riêng tư: liên hệ trực tiếp nhóm phát triển
+MStudent hoặc người đã mời bạn dùng thử.</p>
+</body>
+</html>

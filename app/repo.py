@@ -361,6 +361,47 @@ def stats(user_id: int) -> dict:
         }
 
 
+# ---------------- Chi phí LLM (toàn hệ thống; không lưu nội dung) ----------------
+
+
+def record_llm_usage(
+    user_id: int | None,
+    agent: str,
+    input_tokens: int,
+    output_tokens: int,
+    cost_usd: float,
+    latency_ms: int,
+) -> None:
+    """Ghi một lượt gọi LLM. user_id=None là lượt gọi hệ thống (eval, ai-check)."""
+    with connect() as c:
+        c.execute(
+            "INSERT INTO llm_usage (user_id, day, agent, input_tokens, output_tokens, cost_usd, latency_ms, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            (
+                user_id,
+                config.now().date().isoformat(),
+                agent[:40],
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                latency_ms,
+                config.utcnow().isoformat(),
+            ),
+        )
+
+
+def llm_cost_on(day: str) -> float:
+    with connect() as c:
+        return c.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE day=?", (day,)).fetchone()[0]
+
+
+def mark_budget_alert(day: str, level: int) -> bool:
+    """True nếu đây là lần đầu ghi nhận mức cảnh báo này trong ngày (tức là cần gửi)."""
+    with connect() as c:
+        cur = c.execute("INSERT OR IGNORE INTO budget_alerts (day, level) VALUES (?,?)", (day, level))
+        return cur.rowcount == 1
+
+
 # ---------------- Cấu hình agent (toàn hệ thống) ----------------
 
 

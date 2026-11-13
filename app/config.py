@@ -139,3 +139,59 @@ def google_client_ids() -> list[str]:
     """Mọi client ID được chấp nhận làm `aud` của Google ID token (web, iOS, Android)."""
     ids = [google_web_client_id(), google_ios_client_id(), *_csv("GOOGLE_EXTRA_CLIENT_IDS")]
     return [i for i in ids if i]
+
+
+# ---------------- Production: chi phí LLM, proxy, cảnh báo ----------------
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def llm_daily_usd() -> float:
+    """Trần chi phí LLM mỗi ngày (USD) cho toàn hệ thống. Chạm trần → chạy bộ luật (offline)."""
+    return _float_env("MSTUDENT_LLM_DAILY_USD", 5.0)
+
+
+def llm_timeout_s() -> float:
+    """Thời hạn chờ một lượt gọi LLM. Quá hạn → chuyển sang bộ luật."""
+    return _float_env("MSTUDENT_LLM_TIMEOUT_S", 25.0)
+
+
+def price_in_per_m() -> float:
+    """USD cho 1 triệu token đầu vào (mặc định theo gpt-5-mini; đổi model thì đổi giá)."""
+    return _float_env("MSTUDENT_PRICE_IN_PER_M", 0.25)
+
+
+def price_out_per_m() -> float:
+    return _float_env("MSTUDENT_PRICE_OUT_PER_M", 2.0)
+
+
+def trust_proxy() -> bool:
+    """Bật khi chạy sau đường hầm/reverse proxy trên chính máy này (chỉ tin header từ 127.0.0.1)."""
+    return os.getenv("MSTUDENT_TRUST_PROXY") == "1"
+
+
+def alert_webhook() -> str:
+    """URL webhook (Discord/Slack/Telegram bot) nhận cảnh báo chi phí. Trống = không gửi."""
+    return os.getenv("MSTUDENT_ALERT_WEBHOOK", "")
+
+
+def check_prod_config() -> None:
+    """Ở chế độ prod: thiếu cấu hình bắt buộc thì không cho khởi động. Chỉ nêu TÊN biến, không in giá trị."""
+    if not is_prod():
+        return
+    problems: list[str] = []
+    if len(os.getenv("MSTUDENT_SECRET_KEY", "")) < 32:
+        problems.append("MSTUDENT_SECRET_KEY (cần >= 32 ký tự)")
+    if not os.getenv("OPENAI_API_KEY"):
+        problems.append("OPENAI_API_KEY")
+    if not admin_emails():
+        problems.append("MSTUDENT_ADMIN_EMAILS")
+    if os.getenv("MSTUDENT_NOW"):
+        problems.append("MSTUDENT_NOW (phải bỏ trống ở prod, nếu không trần chi phí không sang ngày mới)")
+    if problems:
+        raise RuntimeError("MSTUDENT_ENV=prod thiếu hoặc sai cấu hình: " + "; ".join(problems))

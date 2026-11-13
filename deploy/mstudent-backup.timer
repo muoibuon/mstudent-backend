@@ -1,0 +1,10 @@
+# /etc/systemd/system/mstudent-backup.timer — chạy sao lưu lúc 03:00 giờ Việt Nam mỗi ngày.
+[Unit]
+Description=MStudent daily database backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Ho_Chi_Minh
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -14,7 +14,7 @@ import re
 import unicodedata
 from datetime import datetime
 
-from .. import config, repo
+from .. import budget, config, repo
 from ..models import Category, ChatResponse, ChatTurn, Message, Priority, Source, ToolCall
 from . import orchestrator, planner, rules
 
@@ -74,10 +74,11 @@ async def tool_get_digest(user_id: int) -> str:
 
 
 async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
-    from agents import Agent, Runner, function_tool
+    from agents import Agent, function_tool
     from agents.items import ToolCallItem, ToolCallOutputItem
 
     from .. import agent_config
+    from . import llm_agents
 
     @function_tool
     def list_tasks(days: int | None, category: str | None) -> str:
@@ -121,7 +122,7 @@ async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> Chat
     )
     items = [{"role": h.role, "content": h.content} for h in history[-10:]]
     items.append({"role": "user", "content": message})
-    res = await Runner.run(agent, items, max_turns=8)
+    res = await llm_agents.run_llm(agent, items, user_id=user_id, max_turns=8)
 
     calls: list[ToolCall] = []
     for it in res.new_items:
@@ -194,7 +195,7 @@ async def _offline_chat(user_id: int, message: str) -> ChatResponse:
 
 
 async def chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
-    if config.llm_enabled():
+    if budget.llm_allowed():
         try:
             return await _llm_chat(user_id, message, history)
         except Exception as e:

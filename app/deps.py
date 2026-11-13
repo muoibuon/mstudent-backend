@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import Depends, Header, HTTPException, Request
 
 from . import config, repo, security
 
+_LOCAL_PROXY = {"127.0.0.1", "::1"}
+
 
 def client_ip(request: Request) -> str:
-    # Không tin X-Forwarded-For trừ khi tự đặt proxy tin cậy ở trước; mặc định dùng địa chỉ kết nối.
-    return request.client.host if request.client else "unknown"
+    """Địa chỉ của client, dùng cho giới hạn tần suất và audit.
+
+    Mặc định dùng địa chỉ kết nối. Chỉ đọc X-Forwarded-For khi MSTUDENT_TRUST_PROXY=1 VÀ kết nối đến từ
+    chính máy này (đường hầm/reverse proxy cục bộ) — client ngoài không tự giả mạo header được.
+    """
+    peer = request.client.host if request.client else "unknown"
+    if config.trust_proxy() and peer in _LOCAL_PROXY:
+        first = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        try:
+            return str(ipaddress.ip_address(first))
+        except ValueError:
+            pass
+    return peer
 
 
 def is_admin(user: dict) -> bool:

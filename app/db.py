@@ -72,6 +72,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT NOT NULL, user_id INTEGER, event TEXT NOT NULL, ip TEXT, detail TEXT
 );
+-- Mỗi lượt gọi LLM thành công. user_id NULL = lượt gọi hệ thống (eval, ai-check). Không lưu nội dung.
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    day TEXT NOT NULL, agent TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+    cost_usd REAL NOT NULL, latency_ms INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_llm_usage_day ON llm_usage(day);
+CREATE INDEX IF NOT EXISTS ix_llm_usage_user ON llm_usage(user_id, day);
+-- Bộ đếm giới hạn tần suất (cửa sổ cố định), bền vững qua khởi động lại.
+CREATE TABLE IF NOT EXISTS rate_counters (
+    key TEXT NOT NULL, window_start INTEGER NOT NULL, count INTEGER NOT NULL,
+    PRIMARY KEY (key, window_start)
+);
+-- Đã gửi cảnh báo chi phí mức nào (80, 100) trong ngày nào — để mỗi mức chỉ báo một lần mỗi ngày.
+CREATE TABLE IF NOT EXISTS budget_alerts (day TEXT NOT NULL, level INTEGER NOT NULL, PRIMARY KEY (day, level));
 """
 
 _initialized: set[str] = set()

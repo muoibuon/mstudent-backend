@@ -5,9 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import threading
-import time
 import uuid
-from collections import defaultdict, deque
 from datetime import timedelta
 
 import jwt
@@ -15,7 +13,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import config
+from . import config, db
 
 # ---------------- Mật khẩu ----------------
 
@@ -124,30 +122,46 @@ def decrypt(cipher: str) -> str | None:
 
 
 class RateLimiter:
-    """Cửa sổ trượt trong bộ nhớ. Đủ cho một tiến trình (localhost); nhiều tiến trình thì chuyển sang Redis."""
+    """Giới hạn tần suất lưu trong SQLite (bảng rate_counters) — còn nguyên sau khi khởi động lại.
+
+    Cửa sổ trượt xấp xỉ: ước lượng = số lần ở cửa sổ trước × phần còn chồng lấn + số lần ở cửa sổ hiện tại.
+    Nhiều tiến trình dùng chung một file CSDL vẫn đếm đúng.
+    """
 
     def __init__(self) -> None:
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
     def hit(self, key: str, limit: int, window_s: int) -> int | None:
         """Ghi nhận một lần gọi. Trả về số giây phải chờ nếu vượt giới hạn, None nếu được phép."""
-        now = time.monotonic()
-        with self._lock:
-            q = self._hits[key]
-            while q and now - q[0] > window_s:
-                q.popleft()
-            if len(q) >= limit:
-                return max(1, int(window_s - (now - q[0])) + 1)
-            q.append(now)
+        now = config.utcnow().timestamp()
+        start = int(now // window_s) * window_s
+        elapsed = now - start
+        with self._lock, db.connect() as c:
+            rows = dict(
+                c.execute(
+                    "SELECT window_start, count FROM rate_counters WHERE key=? AND window_start IN (?,?)",
+                    (key, start, start - window_s),
+                ).fetchall()
+            )
+            current = rows.get(start, 0)
+            estimate = rows.get(start - window_s, 0) * (1 - elapsed / window_s) + current
+            if estimate >= limit:
+                return max(1, int(window_s - elapsed) + 1)
+            c.execute(
+                "INSERT INTO rate_counters (key, window_start, count) VALUES (?,?,1) "
+                "ON CONFLICT(key, window_start) DO UPDATE SET count=count+1",
+                (key, start),
+            )
+            if secrets.randbelow(200) == 0:  # dọn bản ghi cũ theo cơ hội
+                c.execute("DELETE FROM rate_counters WHERE window_start < ?", (int(now) - 2 * 86400,))
             return None
 
     def reset(self, key: str | None = None) -> None:
-        with self._lock:
+        with self._lock, db.connect() as c:
             if key is None:
-                self._hits.clear()
+                c.execute("DELETE FROM rate_counters")
             else:
-                self._hits.pop(key, None)
+                c.execute("DELETE FROM rate_counters WHERE key=?", (key,))
 
 
 limiter = RateLimiter()

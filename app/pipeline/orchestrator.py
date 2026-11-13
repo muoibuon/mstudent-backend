@@ -12,7 +12,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from .. import config, repo
+from .. import budget, config, repo
 from ..models import Category, IngestResult, Message, Priority, Source, Task
 from . import planner, rules
 
@@ -66,16 +66,16 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
     tr = Tracer()
     mode = "offline"
     tri = ext = None
-    if config.llm_enabled():
+    if budget.llm_allowed():
         from . import llm_agents
 
         t0 = time.perf_counter()
         try:
-            tri = await llm_agents.llm_triage(msg)
+            tri = await llm_agents.llm_triage(msg, user_id)
             tr.add("Triage", "llm", t0, tri)
             if tri.relevant:
                 t0 = time.perf_counter()
-                ext = await llm_agents.llm_extract(msg)
+                ext = await llm_agents.llm_extract(msg, user_id)
                 tr.add("Extractor", "llm", t0, ext)
             mode = "llm"
         except Exception as e:  # mạng/credit/model lỗi → không làm hỏng luồng
@@ -156,11 +156,11 @@ def digest_text(tasks: list[Task], ref: datetime) -> str:
 async def digest(user_id: int) -> dict:
     ref = config.now()
     tasks = planner.live(repo.list_tasks(user_id, "open"), ref)
-    if config.llm_enabled():
+    if budget.llm_allowed():
         try:
             from . import llm_agents
 
-            return {"mode": "llm", "text": await llm_agents.llm_digest(tasks)}
+            return {"mode": "llm", "text": await llm_agents.llm_digest(tasks, user_id)}
         except Exception as e:
             log.warning("Digest LLM lỗi: %s", e)
     return {"mode": "offline", "text": digest_text(tasks, ref)}
@@ -174,6 +174,13 @@ async def ai_selfcheck() -> dict:
     if not config.llm_enabled():
         why = "MSTUDENT_OFFLINE=1" if config.is_offline_forced() else "chưa có OPENAI_API_KEY trên server"
         return {"ok": False, "mode": "offline", "model": model, "error": f"AI đang tắt: {why}"}
+    if budget.exhausted():
+        return {
+            "ok": False,
+            "mode": "offline",
+            "model": model,
+            "error": "AI tạm dừng: đã chạm trần chi phí LLM hôm nay, đang chạy bằng bộ luật",
+        }
     from . import llm_agents
 
     sample = Message(

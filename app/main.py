@@ -17,6 +17,9 @@ from .routers import auth, core, google
 
 ROOT = Path(__file__).resolve().parent
 
+# Production: thiếu cấu hình bắt buộc thì dừng ngay lúc khởi động (chỉ nêu tên biến).
+config.check_prod_config()
+
 app = FastAPI(
     title="MStudent",
     version="1.0.0",
@@ -94,6 +97,12 @@ def public_config():
 
 
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+
+@app.get("/privacy", include_in_schema=False)
+def privacy():
+    """Công khai: trang tĩnh Chính sách quyền riêng tư (không đọc CSDL)."""
+    return FileResponse(ROOT / "static" / "privacy.html", media_type="text/html; charset=utf-8")
 
 
 @app.get("/", include_in_schema=False)

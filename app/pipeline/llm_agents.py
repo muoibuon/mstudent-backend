@@ -2,15 +2,18 @@
 
 Prompt và model đọc từ agent_config mỗi lần gọi, nên sửa trên UI là có hiệu lực ngay.
 Chỉ được import khi config.llm_enabled() là True.
+Mọi lượt gọi đi qua run_llm(): có thời hạn chờ (timeout) và được tính vào trần chi phí theo ngày.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 from agents import Agent, Runner
 
-from .. import agent_config
+from .. import agent_config, budget, config
 from ..config import now
 from ..models import ExtractionOut, Message, Task, TriageOut
 
@@ -42,19 +45,29 @@ def render(msg: Message) -> str:
     )
 
 
-async def llm_triage(msg: Message) -> TriageOut:
-    res = await Runner.run(_agent("Triage", "triage_prompt", TriageOut), render(msg))
+async def run_llm(agent: Agent, payload, *, user_id: int | None, **kwargs):
+    """Mọi lượt gọi LLM đi qua đây: có thời hạn chờ và được ghi vào chi phí trong ngày."""
+    started = time.perf_counter()
+    res = await asyncio.wait_for(Runner.run(agent, payload, **kwargs), timeout=config.llm_timeout_s())
+    budget.record(user_id, agent.name, res, started)
+    return res
+
+
+async def llm_triage(msg: Message, user_id: int | None = None) -> TriageOut:
+    res = await run_llm(_agent("Triage", "triage_prompt", TriageOut), render(msg), user_id=user_id)
     return res.final_output
 
 
-async def llm_extract(msg: Message) -> ExtractionOut:
-    res = await Runner.run(_agent("Extractor", "extract_prompt", ExtractionOut), render(msg))
+async def llm_extract(msg: Message, user_id: int | None = None) -> ExtractionOut:
+    res = await run_llm(_agent("Extractor", "extract_prompt", ExtractionOut), render(msg), user_id=user_id)
     return res.final_output
 
 
-async def llm_digest(tasks: list[Task]) -> str:
+async def llm_digest(tasks: list[Task], user_id: int | None = None) -> str:
     payload = json.dumps([t.model_dump(mode="json") for t in tasks], ensure_ascii=False)
-    res = await Runner.run(
-        _agent("Digest", "digest_prompt"), f"Bây giờ là {now().isoformat()}.\nTasks:\n{payload}"
+    res = await run_llm(
+        _agent("Digest", "digest_prompt"),
+        f"Bây giờ là {now().isoformat()}.\nTasks:\n{payload}",
+        user_id=user_id,
     )
     return str(res.final_output)

@@ -1,0 +1,26 @@
+# /etc/systemd/system/mstudent.service — backend MStudent (1 tiến trình, chỉ nghe trên localhost).
+# Ra Internet qua đường hầm HTTPS (tailscale funnel 8000). Xem specs/001-backend-production/quickstart.md
+[Unit]
+Description=MStudent backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mstudent
+Group=mstudent
+WorkingDirectory=/opt/mstudent/app/backend
+EnvironmentFile=/etc/mstudent.env
+# --no-proxy-headers: app tự đọc X-Forwarded-For (MSTUDENT_TRUST_PROXY=1), tránh xử lý hai lần.
+ExecStart=/opt/mstudent/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-proxy-headers
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mstudent/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

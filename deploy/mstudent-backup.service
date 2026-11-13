@@ -1,0 +1,14 @@
+# /etc/systemd/system/mstudent-backup.service — sao lưu CSDL một lần (được gọi bởi mstudent-backup.timer).
+[Unit]
+Description=MStudent database backup
+
+[Service]
+Type=oneshot
+User=mstudent
+Group=mstudent
+ExecStart=/opt/mstudent/venv/bin/python /opt/mstudent/app/backend/deploy/backup.py /opt/mstudent/data/mstudent.db /var/backups/mstudent 7
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/mstudent /opt/mstudent/data
+UMask=0077
