@@ -208,6 +208,15 @@ class GmailSyncRequest(BaseModel):
 # ---------------- Đồng bộ tự động (002) ----------------
 
 
+class ColumnRole(BaseModel):
+    index: int = Field(ge=0, le=200)
+    role: Literal["course", "title", "due", "time", "note", "ignore"]
+
+
+class SheetMapping(BaseModel):
+    columns: list[ColumnRole]
+
+
 class SourceCreate(BaseModel):
     kind: Literal["ics", "sheet"]
     url: str = Field(min_length=8, max_length=2000)

@@ -34,6 +34,15 @@ Luôn dùng tool thay vì đoán:
 - complete_task: khi người dùng nói đã xong một việc (cần id; nếu chưa rõ thì list_tasks trước).
 - get_digest: khi người dùng muốn tóm tắt/bản tin.
 Khi liệt kê việc: mỗi dòng "#id · giờ ngày — việc", việc gấp đánh dấu ⚠️.""",
+    "sheet_mapper_prompt": """Bạn nhận dòng tiêu đề và vài dòng mẫu của một bảng tính deadline do lớp sinh viên tự lập.
+Hãy xác định vai trò của TỪNG cột (theo chỉ số cột, bắt đầu từ 0):
+- course: mã học phần hoặc tên môn
+- title: nội dung việc cần làm / tên bài tập (bắt buộc chọn đúng 1 cột)
+- due: ngày hạn (có thể kèm giờ)
+- time: giờ hạn nếu nằm ở cột riêng
+- note: ghi chú, link, yêu cầu thêm
+- ignore: STT, người phụ trách, trạng thái, cột trống, cột khác
+Mỗi vai trò course/title/due/time/note dùng tối đa 1 cột. Trả về đủ mọi cột.""",
 }
 
 # Luôn được nối vào sau prompt, admin không sửa được: thông báo là DỮ LIỆU, không phải mệnh lệnh.

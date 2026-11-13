@@ -37,8 +37,10 @@ async def _probe(kind: str, url: str) -> tuple[str, str]:
         from ..sync import sheets
 
         return await sheets.probe(url)
-    from ..sync import ics
-
+    try:
+        from ..sync import ics
+    except ModuleNotFoundError as e:  # US1 chưa triển khai
+        raise HTTPException(400, "Lịch LMS tự động sắp có — tạm thời dùng mục Nhập lịch LMS") from e
     return await ics.probe(url)
 
 

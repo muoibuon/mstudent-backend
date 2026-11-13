@@ -170,3 +170,186 @@ def test_delete_account_removes_sync_data(client):
     db = sqlite3.connect(config.DB_PATH)
     for table in ("sync_connections", "source_items", "push_tokens"):
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+# ---------------- US3: Bảng deadline của lớp (T030, T031) ----------------
+
+import asyncio  # noqa: E402
+
+import httpx  # noqa: E402
+import pytest  # noqa: E402
+
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1AbC-dEf_123/edit#gid=456"
+
+
+def test_normalize_sheet_url_variants():
+    from app.sync import sheets
+
+    assert sheets.normalize_sheet_url(SHEET_URL) == ("1AbC-dEf_123", "456")
+    assert sheets.normalize_sheet_url("https://docs.google.com/spreadsheets/d/1AbC/edit?usp=sharing") == (
+        "1AbC",
+        "0",
+    )
+    assert sheets.normalize_sheet_url("docs.google.com/spreadsheets/d/1AbC/htmlview?gid=7") == ("1AbC", "7")
+    assert (
+        sheets.export_url("1AbC", "7")
+        == "https://docs.google.com/spreadsheets/d/1AbC/export?format=csv&gid=7"
+    )
+    for bad in (
+        "https://evil.com/spreadsheets/d/1AbC",
+        "https://docs.google.com/document/d/1AbC/edit",
+        "ftp://x",
+    ):
+        with pytest.raises(sheets.SheetError):
+            sheets.normalize_sheet_url(bad)
+
+
+def _mock_http(monkeypatch, handler):
+    from app.sync import sheets
+
+    monkeypatch.setattr(sheets, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(sheets, "_ensure_public", lambda host: None)
+
+
+def test_fetch_csv_follows_only_google_redirects(monkeypatch):
+    from app.sync import sheets
+
+    def handler(req):
+        if req.url.host == "docs.google.com":
+            return httpx.Response(307, headers={"location": "https://doc-0s.googleusercontent.com/x"})
+        return httpx.Response(
+            200, text="Môn,Nội dung,Hạn\nOOP,Lab 1,20/11", headers={"content-type": "text/csv"}
+        )
+
+    _mock_http(monkeypatch, handler)
+    assert asyncio.run(sheets.fetch_csv("1AbC", "0")).startswith("Môn,")
+
+    _mock_http(
+        monkeypatch, lambda req: httpx.Response(302, headers={"location": "http://169.254.169.254/latest"})
+    )
+    with pytest.raises(sheets.SheetError):
+        asyncio.run(sheets.fetch_csv("1AbC", "0"))
+
+    login = "<!DOCTYPE html><html><body>Sign in</body></html>"
+    _mock_http(
+        monkeypatch, lambda req: httpx.Response(200, text=login, headers={"content-type": "text/html"})
+    )
+    with pytest.raises(sheets.SheetError, match="chia sẻ"):
+        asyncio.run(sheets.fetch_csv("1AbC", "0"))
+
+    big = "a,b\n" + "x,y\n" * 400_000
+    _mock_http(monkeypatch, lambda req: httpx.Response(200, text=big, headers={"content-type": "text/csv"}))
+    with pytest.raises(sheets.SheetError, match="lớn"):
+        asyncio.run(sheets.fetch_csv("1AbC", "0"))
+
+
+def test_parse_due_vietnamese_formats():
+    from app.sync import sheets
+
+    ref = REF  # 2026-11-10 08:00 +07:00
+    assert sheets.parse_due("20/11", ref) == "2026-11-20T23:59:00+07:00"
+    assert sheets.parse_due("20/11/2026 17:00", ref) == "2026-11-20T17:00:00+07:00"
+    assert sheets.parse_due("23h59 20/11", ref) == "2026-11-20T23:59:00+07:00"
+    assert sheets.parse_due("Thứ 6, 21/11 - 9h30", ref) == "2026-11-21T09:30:00+07:00"
+    assert sheets.parse_due("2026-11-25", ref) == "2026-11-25T23:59:00+07:00"
+    assert (
+        sheets.parse_due("11/25/2026", ref) == "2026-11-25T23:59:00+07:00"
+    )  # định dạng Mỹ: tháng > 12 là ngày
+    assert sheets.parse_due("05/01", ref) == "2027-01-05T23:59:00+07:00"  # qua năm mới
+    assert sheets.parse_due("sắp tới", ref) is None and sheets.parse_due("", ref) is None
+
+
+def test_rule_mapping_guesses_columns():
+    from app.sync import sheets
+
+    m = sheets.rule_mapping(["STT", "Mã HP", "Nội dung bài tập", "Hạn nộp", "Giờ", "Ghi chú"])
+    assert m == {"course": 1, "title": 2, "due": 3, "time": 4, "note": 5}
+    m = sheets.rule_mapping(["Môn học", "Deadline", "Việc cần làm"])
+    assert m["course"] == 0 and m["due"] == 1 and m["title"] == 2
+
+
+CSV_V1 = "Môn,Nội dung,Hạn nộp\nINT3306,Nộp báo cáo Lab 5,20/11\nOOP,Bài tập lớn,25/11 17:00\nGiải tích,Ôn thi giữa kỳ,01/11\n"
+
+
+def _sheet_conn(client, user, monkeypatch, csv_text: dict, mapper_calls: list):
+    from app.models import ColumnRole, SheetMapping
+    from app.pipeline import llm_agents
+    from app.sync import sheets
+
+    async def fake_fetch(sheet_id, gid):
+        return csv_text["v"]
+
+    async def fake_mapper(header, samples, user_id):
+        mapper_calls.append(header)
+        roles = {"Môn": "course", "Nội dung": "title", "Hạn nộp": "due"}
+        return SheetMapping(
+            columns=[ColumnRole(index=i, role=roles.get(h, "ignore")) for i, h in enumerate(header)]
+        )
+
+    monkeypatch.setattr(sheets, "fetch_csv", fake_fetch)
+    monkeypatch.setattr(llm_agents, "llm_map_sheet", fake_mapper)
+    monkeypatch.setattr(sheets.budget, "llm_allowed", lambda user_id=None: True)
+    uid = _uid(client, user[0])
+    return uid, repo.create_connection(uid, "sheet", "1AbC#0", "K70")
+
+
+def _run(conn_id, uid):
+    from app.sync import sheets
+
+    return asyncio.run(sheets.run(repo.get_connection(uid, conn_id)))
+
+
+def _tasks(uid):
+    return {t.title: t for t in repo.list_tasks(uid, None)}
+
+
+def test_sheet_runner_tracks_rows(client, user, monkeypatch):
+    csv_text, calls = {"v": CSV_V1}, []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, calls)
+    res = _run(conn["id"], uid)
+    repo.finish_run(conn["id"], ok=True, next_run_at="2000", state=res.state)
+    t = _tasks(uid)
+    # Dòng quá hạn > 1 ngày ở lượt đầu bị bỏ qua (FR-075)
+    assert set(t) == {"Nộp báo cáo Lab 5", "Bài tập lớn"} and len(calls) == 1
+    assert t["Bài tập lớn"].due_at == "2026-11-25T17:00:00+07:00" and t["Bài tập lớn"].sources == ["sheet"]
+
+    res = _run(conn["id"], uid)  # không đổi gì → không gọi lại AI, không tạo/cập nhật
+    assert res.created == [] and res.updated == [] and len(calls) == 1
+    repo.finish_run(conn["id"], ok=True, next_run_at="2000", state=res.state)
+
+    csv_text["v"] = (
+        "Môn,Nội dung,Hạn nộp\nINT3306,Nộp báo cáo Lab 5,22/11\nMAT1101,Bài tập chương 3,28/11\n"  # sửa hạn Lab 5, xoá dòng OOP, thêm dòng mới
+    )
+    res = _run(conn["id"], uid)
+    t = _tasks(uid)
+    assert t["Nộp báo cáo Lab 5"].due_at.startswith("2026-11-22") and len(res.updated) == 1
+    assert "Bài tập chương 3" in t and len(res.created) == 1
+    assert "Không còn trong bảng lớp" in (t["Bài tập lớn"].note or "") and t["Bài tập lớn"].status == "open"
+
+
+def test_sheet_header_change_remaps_and_ai_off_uses_rules(client, user, monkeypatch):
+    csv_text, calls = {"v": CSV_V1}, []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, calls)
+    from app.sync import sheets
+
+    monkeypatch.setattr(sheets.budget, "llm_allowed", lambda user_id=None: False)
+    res = _run(conn["id"], uid)
+    assert calls == [] and len(res.created) == 2 and res.mode == "offline"  # luật đoán cột
+    repo.finish_run(conn["id"], ok=True, next_run_at="2000", state=res.state)
+    monkeypatch.setattr(sheets.budget, "llm_allowed", lambda user_id=None: True)
+    csv_text["v"] = CSV_V1.replace("Nội dung", "Nội dung bài")
+    _run(conn["id"], uid)
+    assert len(calls) == 1  # tiêu đề cột đổi → hỏi lại AI
+
+
+def test_sheet_private_link_rejected_on_add(client, user, monkeypatch):
+    from app.sync import sheets
+
+    async def private(sheet_id, gid):
+        raise sheets.SheetError(sheets.PRIVATE_MSG)
+
+    monkeypatch.setattr(sheets, "fetch_csv", private)
+    r = client.post("/api/sources", json={"kind": "sheet", "url": SHEET_URL}, headers=user[0])
+    assert r.status_code == 400 and "chia sẻ" in r.json()["detail"]
+    r = client.post("/api/sources", json={"kind": "sheet", "url": "https://evil.com/x"}, headers=user[0])
+    assert r.status_code == 400
