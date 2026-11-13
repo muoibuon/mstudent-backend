@@ -762,3 +762,82 @@ def test_classroom_blocked_by_school_disables_only_classroom(classroom_world):
     c = repo.get_connection(uid, cid)
     assert c["enabled"] is False and "trường" in c["last_error"]
     assert repo.get_connection(uid, gmail_conn["id"])["enabled"] is True
+
+
+# ---------------- US4: thông báo đẩy (T035) ----------------
+
+
+@pytest.fixture()
+def expo(monkeypatch):
+    import json
+
+    from app.sync import notify
+
+    sent: list[list[dict]] = []
+    reply = {"tickets": None}
+
+    def handler(req):
+        msgs = json.loads(req.content)
+        sent.append(msgs)
+        tickets = reply["tickets"] or [{"status": "ok", "id": "x"} for _ in msgs]
+        return httpx.Response(200, json={"data": tickets})
+
+    monkeypatch.setattr(notify, "_transport", httpx.MockTransport(handler))
+    return sent, reply
+
+
+def _push_run(uid, conn, created, first):
+    from app.sync import notify, scheduler
+
+    res = scheduler.RunResult(created=created)
+    asyncio.run(notify.after_run(conn, res, first))
+
+
+def test_push_grouped_once_per_run_and_not_on_first_sync(client, user, expo):
+    sent, _ = expo
+    uid = _uid(client, user[0])
+    conn = repo.create_connection(uid, "sheet", "x", "Bảng lớp K70")
+    repo.upsert_push_token(uid, "ExponentPushToken[on]", "android", True)
+    repo.upsert_push_token(uid, "ExponentPushToken[off]", "android", False)  # đã tắt nhắc việc
+    created, _ = planner.plan(
+        uid,
+        [_draft("Nộp báo cáo Lab 5", "INT3306", "2026-11-21T23:59:00+07:00"), _draft("Bài tập lớn", "OOP", "2026-11-25T17:00:00+07:00")],
+        source="sheet", message_id="m", ref=REF,
+    )  # fmt: skip
+    _push_run(uid, conn, created, first=True)
+    assert sent == []  # lượt đầu không gửi (FR-076)
+
+    _push_run(uid, conn, created, first=False)
+    assert len(sent) == 1 and [m["to"] for m in sent[0]] == ["ExponentPushToken[on]"]
+    msg = sent[0][0]
+    assert msg["title"] == "MStudent: 2 việc mới"
+    assert msg["body"] == "Từ Bảng lớp K70 · sớm nhất: Nộp báo cáo Lab 5 · hạn T7 21/11 23:59"
+    assert sorted(msg["data"]["task_ids"]) == sorted(t.id for t in created)
+
+
+def test_push_single_task_and_dead_token_removed(client, user, expo):
+    sent, reply = expo
+    uid = _uid(client, user[0])
+    conn = repo.create_connection(uid, "gmail", "", "sv@gmail.com")
+    repo.upsert_push_token(uid, "ExponentPushToken[dead]", "android", True)
+    created, _ = planner.plan(
+        uid, [_draft("Nộp Lab 6", "INT3306", None)], source="email", message_id="m", ref=REF
+    )
+    reply["tickets"] = [{"status": "error", "details": {"error": "DeviceNotRegistered"}}]
+    _push_run(uid, conn, created, first=False)
+    assert sent[0][0]["title"] == "MStudent: việc mới" and sent[0][0]["body"] == "Nộp Lab 6 · không có hạn"
+    assert repo.push_tokens_for(uid) == []
+
+
+def test_push_failure_never_breaks_sync(client, user, monkeypatch):
+    from app.sync import notify
+
+    def boom(req):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(notify, "_transport", httpx.MockTransport(boom))
+    uid = _uid(client, user[0])
+    conn = repo.create_connection(uid, "sheet", "x", "K70")
+    repo.upsert_push_token(uid, "ExponentPushToken[on]", "android", True)
+    created, _ = planner.plan(uid, [_draft("Nộp Lab 7")], source="sheet", message_id="m", ref=REF)
+    _push_run(uid, conn, created, first=False)  # không ném lỗi
