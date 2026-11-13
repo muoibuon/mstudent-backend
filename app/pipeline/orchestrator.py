@@ -66,7 +66,7 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
     tr = Tracer()
     mode = "offline"
     tri = ext = None
-    if budget.llm_allowed():
+    if budget.llm_allowed(user_id):
         from . import llm_agents
 
         t0 = time.perf_counter()
@@ -156,7 +156,7 @@ def digest_text(tasks: list[Task], ref: datetime) -> str:
 async def digest(user_id: int) -> dict:
     ref = config.now()
     tasks = planner.live(repo.list_tasks(user_id, "open"), ref)
-    if budget.llm_allowed():
+    if budget.llm_allowed(user_id):
         try:
             from . import llm_agents
 
@@ -166,7 +166,7 @@ async def digest(user_id: int) -> dict:
     return {"mode": "offline", "text": digest_text(tasks, ref)}
 
 
-async def ai_selfcheck() -> dict:
+async def ai_selfcheck(user_id: int | None = None) -> dict:
     """Gọi thật một lượt Triage để biết AI có chạy trực tiếp được không (dùng trước giờ demo)."""
     from .. import agent_config
 
@@ -181,6 +181,13 @@ async def ai_selfcheck() -> dict:
             "model": model,
             "error": "AI tạm dừng: đã chạm trần chi phí LLM hôm nay, đang chạy bằng bộ luật",
         }
+    if budget.user_exhausted(user_id):
+        return {
+            "ok": False,
+            "mode": "offline",
+            "model": model,
+            "error": "Bạn đã dùng hết hạn mức AI hôm nay, đang chạy bằng bộ luật tới hết ngày",
+        }
     from . import llm_agents
 
     sample = Message(
@@ -190,7 +197,7 @@ async def ai_selfcheck() -> dict:
     )
     t0 = time.perf_counter()
     try:
-        tri = await llm_agents.llm_triage(sample)
+        tri = await llm_agents.llm_triage(sample, user_id)
     except Exception as e:
         return {"ok": False, "mode": "llm", "model": model, "error": _short_error(e)}
     return {

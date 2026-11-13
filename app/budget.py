@@ -1,7 +1,9 @@
-"""Trần chi phí LLM theo ngày cho toàn hệ thống.
+"""Trần chi phí LLM theo ngày: toàn hệ thống và từng người dùng.
 
-- `llm_allowed()`: có được gọi LLM lúc này không (có khoá, không ép offline, chưa chạm trần hôm nay).
-- `record()`: ghi token + chi phí ước tính của một lượt gọi, gửi cảnh báo khi chạm 80% và 100%.
+- `llm_allowed(user_id)`: có được gọi LLM lúc này không (có khoá, không ép offline, chưa chạm trần chung hôm nay,
+  và người này chưa chạm trần riêng). Trần riêng ngăn một người đốt hết trần chung của mọi người.
+- `record()`: ghi token + chi phí của một lượt gọi xong; `record_failure()`: lượt lỗi/quá hạn vẫn có thể đã bị tính
+  tiền nên ghi chi phí ước tính. Cả hai gửi cảnh báo khi chạm 80% và 100% trần chung.
 
 Ngày tính theo giờ Việt Nam (`config.now()`). Chạm trần → pipeline chạy bộ luật và ghi rõ mode="offline".
 Không bao giờ lưu hay gửi nội dung prompt/câu trả lời.
@@ -9,6 +11,7 @@ Không bao giờ lưu hay gửi nội dung prompt/câu trả lời.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -32,9 +35,14 @@ def exhausted() -> bool:
     return spent_today() >= config.llm_daily_usd()
 
 
-def llm_allowed() -> bool:
+def user_exhausted(user_id: int | None) -> bool:
+    cap = config.llm_user_daily_usd()
+    return user_id is not None and cap > 0 and repo.llm_cost_user_on(user_id, today()) >= cap
+
+
+def llm_allowed(user_id: int | None = None) -> bool:
     """Dùng thay cho config.llm_enabled() ở mọi chỗ sắp gọi LLM."""
-    return config.llm_enabled() and not exhausted()
+    return config.llm_enabled() and not exhausted() and not user_exhausted(user_id)
 
 
 def cost_usd(input_tokens: int, output_tokens: int) -> float:
@@ -58,6 +66,27 @@ def record(user_id: int | None, agent: str, result, started: float) -> None:
         Exception
     ) as e:  # CSDL bận, v.v. — chi phí lượt này không được ghi, nhưng người dùng vẫn có kết quả
         log.warning("Không ghi được chi phí LLM: %s", type(e).__name__)
+
+
+def estimate_tokens(*parts) -> int:
+    """≈ 4 ký tự / token. Dùng khi không có số liệu usage thật (lượt gọi lỗi hoặc quá hạn)."""
+    return (
+        sum(len(p if isinstance(p, str) else json.dumps(p, ensure_ascii=False, default=str)) for p in parts)
+        // 4
+        + 1
+    )
+
+
+# Lượt lỗi: không biết model đã sinh bao nhiêu → giả định bằng số token đầu vào, tối thiểu 500 (ước tính bi quan).
+def record_failure(user_id: int | None, agent: str, est_input_tokens: int, started: float) -> None:
+    try:
+        tin, tout = est_input_tokens, max(500, est_input_tokens)
+        repo.record_llm_usage(
+            user_id, agent, tin, tout, cost_usd(tin, tout), round((time.perf_counter() - started) * 1000)
+        )
+        _maybe_alert()
+    except Exception as e:
+        log.warning("Không ghi được chi phí LLM (lượt lỗi): %s", type(e).__name__)
 
 
 def _maybe_alert() -> None:

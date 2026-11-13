@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import config
+from . import budget
 from .models import Message, Source
 from .pipeline import rules
 
@@ -25,7 +25,7 @@ async def _run_one(m: Message, use_llm: bool):
 
 
 async def evaluate(use_llm: bool | None = None) -> dict:
-    use_llm = config.llm_enabled() if use_llm is None else use_llm
+    use_llm = budget.llm_allowed() if use_llm is None else use_llm
     cases = json.loads(CASES_PATH.read_text(encoding="utf-8"))
     ref = "2026-11-10T08:00:00+07:00"  # mốc cố định mà cases.json được viết theo
     score = {"relevant": [0, 0], "category": [0, 0], "due": [0, 0], "course": [0, 0]}

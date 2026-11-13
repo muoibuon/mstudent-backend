@@ -133,10 +133,10 @@ def traces(limit: int = 30, user: dict = Depends(current_user)):
 
 
 @router.post("/ai/check")
-async def ai_check(user: dict = Depends(current_user)):
-    """Gọi thật LLM một lượt: dùng để chắc chắn AI chạy trực tiếp trước khi demo."""
+async def ai_check(user: dict = Depends(ai_limit)):
+    """Gọi thật LLM một lượt: dùng để chắc chắn AI chạy trực tiếp trước khi demo. Tính vào hạn mức AI của người gọi."""
     enforce(f"aicheck:{user['id']}", 10, 300)
-    return await orchestrator.ai_selfcheck()
+    return await orchestrator.ai_selfcheck(user["id"])
 
 
 # ---------------- Quản trị ----------------

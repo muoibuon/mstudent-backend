@@ -156,6 +156,11 @@ def llm_daily_usd() -> float:
     return _float_env("MSTUDENT_LLM_DAILY_USD", 5.0)
 
 
+def llm_user_daily_usd() -> float:
+    """Trần chi phí LLM mỗi ngày cho MỖI người dùng (USD). Chạm trần → riêng người đó chạy bộ luật. 0 = tắt."""
+    return _float_env("MSTUDENT_LLM_USER_DAILY_USD", 0.5)
+
+
 def llm_timeout_s() -> float:
     """Thời hạn chờ một lượt gọi LLM. Quá hạn → chuyển sang bộ luật."""
     return _float_env("MSTUDENT_LLM_TIMEOUT_S", 25.0)

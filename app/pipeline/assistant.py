@@ -194,7 +194,7 @@ async def _offline_chat(user_id: int, message: str) -> ChatResponse:
 
 
 async def chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
-    if budget.llm_allowed():
+    if budget.llm_allowed(user_id):
         try:
             return await _llm_chat(user_id, message, history)
         except Exception as e:

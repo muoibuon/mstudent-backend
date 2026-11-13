@@ -57,7 +57,14 @@ def render(msg: Message) -> str:
 async def run_llm(agent: Agent, payload, *, user_id: int | None, **kwargs):
     """Mọi lượt gọi LLM đi qua đây: có thời hạn chờ và được ghi vào chi phí trong ngày."""
     started = time.perf_counter()
-    res = await asyncio.wait_for(Runner.run(agent, payload, **kwargs), timeout=config.llm_timeout_s())
+    try:
+        res = await asyncio.wait_for(Runner.run(agent, payload, **kwargs), timeout=config.llm_timeout_s())
+    except Exception:
+        # Quá hạn/lỗi giữa chừng: OpenAI có thể đã tính tiền → vẫn tính vào trần (ước tính), rồi để bên gọi lùi về luật.
+        budget.record_failure(
+            user_id, agent.name, budget.estimate_tokens(agent.instructions or "", payload), started
+        )
+        raise
     budget.record(user_id, agent.name, res, started)
     return res
 

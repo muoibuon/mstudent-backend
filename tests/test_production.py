@@ -263,7 +263,9 @@ def test_llm_timeout_falls_back_to_rules(client, user, llm_on, monkeypatch):
     r = client.post("/api/ingest", json=NOTICE, headers=h).json()
     assert r["mode"] == "offline"
     assert any("error" in step for step in r["trace"])
-    assert _usage_rows() == []  # lượt hỏng không bị tính tiền
+    # Lượt quá hạn vẫn có thể đã bị OpenAI tính tiền → ghi chi phí ước tính, gắn đúng người dùng.
+    rows = _usage_rows()
+    assert [r[1] for r in rows] == ["Triage"] and rows[0][0] is not None and rows[0][4] > 0
     assert client.post("/api/chat", json={"message": "hôm nay có gì"}, headers=h).json()["mode"] == "offline"
 
 
@@ -404,3 +406,52 @@ def test_digest_llm_output_has_no_wrapper_tags(client, user, llm_on, monkeypatch
 def test_web_console_assets_revalidate_after_deploy(client):
     for path in ("/", "/static/app.js"):
         assert client.get(path).headers["cache-control"] == "no-cache"
+
+
+def test_failed_llm_call_still_counts_toward_budget(client, user, llm_on, monkeypatch):
+    from app.pipeline import llm_agents
+
+    async def broken(agent, payload, **kwargs):
+        raise RuntimeError("model trả về rác")
+
+    monkeypatch.setattr(llm_agents.Runner, "run", broken)
+    h, _ = user
+    assert client.post("/api/chat", json={"message": "tuần này có gì"}, headers=h).json()["mode"] == "offline"
+    rows = _usage_rows()
+    assert len(rows) == 1 and rows[0][1] == "MStudent Assistant" and rows[0][0] is not None and rows[0][4] > 0
+
+
+def test_per_user_daily_cap_only_affects_that_user(client, llm_on, monkeypatch):
+    monkeypatch.setenv("MSTUDENT_LLM_DAILY_USD", "5")
+    monkeypatch.setenv("MSTUDENT_LLM_USER_DAILY_USD", "0.5")
+    heavy, light = auth(signup(client, "nhieu@x.vn")), auth(signup(client, "it@x.vn"))
+    heavy_id = client.get("/api/auth/me", headers=heavy).json()["id"]
+    repo.record_llm_usage(heavy_id, "Assistant", 0, 0, 0.6, 10)
+    assert client.post("/api/ingest", json=NOTICE, headers=heavy).json()["mode"] == "offline"
+    assert client.post("/api/ingest", json=NOTICE, headers=light).json()["mode"] == "llm"
+    r = client.post("/api/ai/check", headers=heavy).json()
+    assert r["ok"] is False and "hôm nay" in r["error"]
+
+
+def test_ai_check_counts_against_user_and_ai_limit(client, user, llm_on, monkeypatch):
+    h, _ = user
+    uid = client.get("/api/auth/me", headers=h).json()["id"]
+    assert client.post("/api/ai/check", headers=h).json()["ok"] is True
+    assert [(r[0], r[1]) for r in _usage_rows()] == [(uid, "Triage")]
+    from app import security
+
+    security.limiter.reset()
+    for _ in range(30):
+        security.limiter.hit(f"ai:m:{uid}", 30, 60)
+    assert client.post("/api/ai/check", headers=h).status_code == 429
+
+
+def test_eval_respects_budget(client, llm_on, monkeypatch):
+    from app import evaluation
+
+    monkeypatch.setenv("MSTUDENT_LLM_DAILY_USD", "1")
+    repo.record_llm_usage(None, "Eval", 0, 0, 2.0, 10)
+    import asyncio
+
+    assert asyncio.run(evaluation.evaluate())["mode"] == "offline"
+    assert llm_on == []

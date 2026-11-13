@@ -430,6 +430,13 @@ def stats_summary(now) -> dict:
         }
 
 
+def llm_cost_user_on(user_id: int, day: str) -> float:
+    with connect() as c:
+        return c.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE user_id=? AND day=?", (user_id, day)
+        ).fetchone()[0]
+
+
 def mark_budget_alert(day: str, level: int) -> bool:
     """True nếu đây là lần đầu ghi nhận mức cảnh báo này trong ngày (tức là cần gửi)."""
     with connect() as c:
