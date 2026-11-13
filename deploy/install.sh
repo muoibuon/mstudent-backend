@@ -58,9 +58,13 @@ fi
 
 systemctl restart mstudent
 systemctl start mstudent-backup.timer
-sleep 3
 echo "==> Kiểm tra"
-if curl -fsS --max-time 5 http://127.0.0.1:8000/api/health; then
+ok=""
+for _ in $(seq 1 15); do  # khởi động có thể mất vài giây (nạp thư viện AI)
+  sleep 1
+  if curl -fsS --max-time 5 http://127.0.0.1:8000/api/health; then ok=1; break; fi
+done
+if [ -n "$ok" ]; then
   echo; echo "OK: backend đang chạy ở 127.0.0.1:8000"
 else
   echo "!! Backend chưa trả lời. Xem log:  sudo journalctl -u mstudent -n 40 --no-pager"; exit 1
