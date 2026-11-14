@@ -1,6 +1,6 @@
 """Tài liệu trong email → việc cần làm + tóm tắt (002 US7).
 
-Chỉ chạy khi email đã được Triage kết luận LIÊN QUAN (không tải tệp của thư quảng cáo — FR-080). Mỗi tài liệu (tệp
+Mỗi tài liệu được lọc riêng: nội dung email bị loại không có nghĩa tài liệu đính kèm cũng là nhiễu. Mỗi tài liệu (tệp
 đính kèm hoặc link Google công khai) được rút chữ, thu gọn rồi đưa qua pipeline như một thông báo riêng có id
 `doc-<sha256 nội dung>` → cùng tài liệu đến lần hai không tốn AI (FR-084), vẫn qua GUARD/sanitize/budget. Việc tạo
 ra từ tài liệu được ghi chú tóm tắt 2–3 câu (FR-083). Lỗi một tệp không làm hỏng email hay tệp khác.
@@ -36,7 +36,7 @@ async def _summary(uid: int, d: docs.DocText) -> str:
 async def ingest_documents(
     uid: int, token: str | None, gmail_id: str, msg: Message, attachments: list[dict], result: IngestResult
 ) -> list[IngestResult]:
-    if not result.relevant or result.duplicate:
+    if result.duplicate:
         return []
     found: list[docs.DocText] = []
     problems: list[str] = []
@@ -70,7 +70,8 @@ async def ingest_documents(
         mid = "doc-" + hashlib.sha256(d.text.encode()).hexdigest()[:24]
         if repo.get_message(uid, mid):
             continue  # cùng tài liệu đã xử lý (email chuyển tiếp…) → không chạy lại AI
-        body = f"Tài liệu kèm email: {msg.subject}\nTệp: {d.name}\n---\n{docs.focus(d.text)}"
+        # Parent marketing text must not contaminate the independent document gate.
+        body = f"Tệp: {d.name}\n---\n{docs.focus(d.text)}"
         out = await orchestrator.ingest(
             uid,
             Message(
@@ -94,4 +95,11 @@ async def ingest_documents(
         for t in result.created + result.updated:
             if not t.note:
                 repo.update_task(uid, t.id, {"note": note})
+        repo.save_trace(
+            uid,
+            msg.id or f"gmail-{gmail_id}",
+            result.mode,
+            "Không đọc được tài liệu kèm email",
+            [{"agent": "Documents", "kind": "python", "ms": 0, "output": {"errors": problems}}],
+        )
     return results

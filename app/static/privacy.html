@@ -16,7 +16,7 @@
 </head>
 <body>
 <h1>Chính sách quyền riêng tư</h1>
-<p class="muted">MStudent · Cập nhật ngày 13/11/2026</p>
+<p class="muted">MStudent · Cập nhật ngày 14/11/2026</p>
 
 <p>MStudent là trợ lý giúp sinh viên biến thông báo từ email, LMS và nhóm lớp thành việc cần làm có hạn và nhắc
 việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào việc gì và bạn kiểm soát nó ra sao.</p>
@@ -27,6 +27,10 @@ việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào vi�
       tôi không đọc được mật khẩu của bạn.</li>
   <li><strong>Gmail (chỉ khi bạn bấm kết nối):</strong> quyền <em>chỉ đọc</em>. Ứng dụng đọc tiêu đề, người
       gửi và nội dung thư gần đây để tìm thông báo học tập. Ứng dụng không gửi, sửa hay xoá thư.</li>
+  <li><strong>Classroom (khi bạn cấp quyền):</strong> lớp đang học, bài tập, hạn, trạng thái nộp bài và thông báo lớp.</li>
+  <li><strong>Tài liệu:</strong> tệp PDF, Word, Excel, CSV/TXT trong email và nội dung từ link Google Docs/Sheets/Slides
+      công khai có thể được đọc để tìm việc cần làm, kể cả khi nội dung thư chứa chúng bị bộ lọc bỏ qua.</li>
+  <li><strong>Hồ sơ học tập:</strong> thông tin trường, bậc học, ngành và các trường hồ sơ bạn nhập để cá nhân hóa gợi ý.</li>
   <li><strong>Lịch LMS:</strong> đường dẫn lịch (.ics) do bạn nhập và các sự kiện trong đó.</li>
   <li><strong>Tin nhắn Zalo và nội dung bạn dán vào:</strong> chỉ những gì bạn chủ động chia sẻ vào ứng dụng.</li>
   <li><strong>Việc cần làm</strong> được tạo ra từ các nguồn trên, và nhật ký xử lý tương ứng.</li>
@@ -42,21 +46,28 @@ việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào vi�
 
 <h2>3. Dữ liệu được gửi tới đâu</h2>
 <ul>
-  <li><strong>Nhà cung cấp mô hình AI (Google Gemini và OpenAI):</strong> nội dung thông báo được gửi tới Google
-      (Gemini Decision) qua API để lọc tin đáng chú ý; tin được giữ lại và câu hỏi của bạn được gửi tới OpenAI qua API
-      để trích việc và trả lời. Khi AI không khả dụng, ứng dụng xử lý bằng bộ luật ngay trên máy chủ và ghi rõ là
-      "offline".</li>
+  <li><strong>OpenRouter và Google:</strong> nội dung thông báo hoặc tài liệu được gửi qua OpenRouter tới
+      Google Gemini Decision để đánh giá độ liên quan và phân loại. Tin chưa chắc chắn được chuyển cho mô hình chính
+      xem lại; bộ lọc có thể sai và không bảo đảm phát hiện mọi thông báo quan trọng.</li>
+  <li><strong>Gateway mô hình chính do đơn vị vận hành cấu hình:</strong> nội dung cần trích việc, tài liệu cần tóm tắt,
+      dữ liệu cần thiết về việc/hồ sơ học tập và câu hỏi của bạn được gửi tới gateway này để xử lý. Gateway có thể
+      chuyển tiếp tới nhà cung cấp mô hình phía sau; tên model cấu hình không tự xác nhận danh tính nhà cung cấp đó.
+      Đơn vị vận hành cần thông báo nơi xử lý dữ liệu thực tế trước khi bạn dùng dịch vụ.</li>
+  <li>Khóa API và mã cấp quyền Google không được đưa vào nội dung gửi cho mô hình. Khi AI không khả dụng, ứng dụng
+      có thể xử lý bằng bộ luật ngay trên máy chủ và ghi rõ là "offline". MStudent không bật chức năng xuất trace
+      của SDK AI sang dịch vụ theo dõi bên ngoài.</li>
   <li><strong>Google (tài khoản):</strong> để đăng nhập và đọc Gmail, Classroom theo quyền bạn cấp.</li>
-  <li>Ngoài hai bên trên, dữ liệu không được chia sẻ cho bên thứ ba nào.</li>
+  <li><strong>Dịch vụ thông báo đẩy:</strong> nếu bạn bật nhắc việc, dịch vụ push nhận token thiết bị và nội dung thông
+      báo cần gửi. Không coi các kết nối nguồn hoặc dịch vụ hạ tầng này là quyền cho AI đọc thêm dữ liệu của bạn.</li>
 </ul>
 
 <h2>4. Lưu trữ và bảo mật</h2>
 <ul>
-  <li>Dữ liệu lưu trên máy chủ do nhóm phát triển quản lý; mọi kết nối giữa ứng dụng và máy chủ đều được mã
-      hoá (HTTPS).</li>
+  <li>Dữ liệu lưu trên máy chủ do nhóm phát triển quản lý; bản triển khai công khai sử dụng HTTPS.</li>
   <li>Dữ liệu của mỗi người dùng được tách riêng; người dùng khác không xem được dữ liệu của bạn.</li>
-  <li>Mã truy cập Gmail được mã hoá trước khi lưu. Nhật ký hệ thống không ghi mật khẩu, mã truy cập hay nội
-      dung thông báo.</li>
+  <li>Refresh token Google được mã hoá trước khi lưu. Nhật ký xử lý có thể giữ kết quả phân loại/trích việc để bạn
+      kiểm tra; khóa API, mật khẩu và mã truy cập không được ghi vào nội dung trace. Thống kê usage giữ token, thời
+      gian và phí, không giữ prompt hay câu trả lời.</li>
   <li>Máy chủ được sao lưu hằng ngày; bản sao lưu được giữ tối đa 7 ngày.</li>
 </ul>
 

@@ -74,10 +74,8 @@ async def tool_get_digest(user_id: int) -> str:
 
 
 async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
-    from agents import Agent, function_tool
+    from agents import function_tool
     from agents.items import ToolCallItem, ToolCallOutputItem
-
-    from .. import agent_config
 
     @function_tool
     def list_tasks(days: int | None, category: str | None) -> str:
@@ -112,12 +110,11 @@ async def _llm_chat(user_id: int, message: str, history: list[ChatTurn]) -> Chat
         """Lấy bản tin tóm tắt các việc trong 7 ngày tới."""
         return await tool_get_digest(user_id)
 
-    cfg = agent_config.get()
-    agent = Agent(
-        name="MStudent Assistant",
-        instructions=f"{cfg['assistant_prompt']}{agent_config.GUARD}\nBây giờ là {config.now().isoformat()}.",
+    agent = llm_agents.build_agent(
+        "MStudent Assistant",
+        "assistant_prompt",
         tools=[list_tasks, add_notice, complete_task, get_digest],
-        model=cfg["model"],
+        instruction_suffix=f"\nBây giờ là {config.now().isoformat()}.",
     )
     items = [{"role": h.role, "content": h.content} for h in history[-10:]]
     items.append({"role": "user", "content": message})
@@ -198,5 +195,5 @@ async def chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatRespo
         try:
             return await _llm_chat(user_id, message, history)
         except Exception as e:
-            log.warning("Chat LLM lỗi, chuyển offline: %s", e)
+            log.warning("Chat LLM lỗi, chuyển offline: %s", type(e).__name__)
     return await _offline_chat(user_id, message)

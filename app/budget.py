@@ -15,12 +15,43 @@ import json
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
 
 from . import config, repo
 
 log = logging.getLogger("mstudent")
+_usage: ContextVar[list | None] = ContextVar("llm_usage", default=None)
+
+
+@contextmanager
+def capture_usage():
+    """Request-local counters for eval; concurrent users cannot contaminate them."""
+    rows = []
+    token = _usage.set(rows)
+    try:
+        yield rows
+    finally:
+        _usage.reset(token)
+
+
+def record_usage(user_id, agent, tin, tout, cost, latency_ms, *, estimated=True):
+    repo.record_llm_usage(user_id, agent, tin, tout, cost, latency_ms)
+    rows = _usage.get()
+    if rows is not None:
+        rows.append(
+            {
+                "agent": agent,
+                "input_tokens": tin,
+                "output_tokens": tout,
+                "cost_usd": cost,
+                "estimated": estimated,
+                "latency_ms": latency_ms,
+            }
+        )
+    _maybe_alert()
 
 
 def today() -> str:
@@ -58,10 +89,9 @@ def record(user_id: int | None, agent: str, result, started: float) -> None:
     """Ghi nhận một lượt gọi LLM đã xong. Không được làm hỏng luồng chính nếu ghi lỗi."""
     try:
         tin, tout = _tokens(result)
-        repo.record_llm_usage(
+        record_usage(
             user_id, agent, tin, tout, cost_usd(tin, tout), round((time.perf_counter() - started) * 1000)
         )
-        _maybe_alert()
     except (
         Exception
     ) as e:  # CSDL bận, v.v. — chi phí lượt này không được ghi, nhưng người dùng vẫn có kết quả
@@ -81,10 +111,9 @@ def estimate_tokens(*parts) -> int:
 def record_failure(user_id: int | None, agent: str, est_input_tokens: int, started: float) -> None:
     try:
         tin, tout = est_input_tokens, max(500, est_input_tokens)
-        repo.record_llm_usage(
+        record_usage(
             user_id, agent, tin, tout, cost_usd(tin, tout), round((time.perf_counter() - started) * 1000)
         )
-        _maybe_alert()
     except Exception as e:
         log.warning("Không ghi được chi phí LLM (lượt lỗi): %s", type(e).__name__)
 

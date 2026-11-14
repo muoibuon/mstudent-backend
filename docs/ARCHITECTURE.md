@@ -16,7 +16,7 @@ flowchart LR
   end
   subgraph Laptop["Máy tính (localhost:8000)"]
     API["FastAPI<br/>auth · tasks · chat · google"]
-    AG["Pipeline agent<br/>Triage → Extractor → Planner<br/>Digest · Assistant"]
+    AG["Pipeline agent<br/>Decision → Extractor / Review → Planner<br/>Digest · Assistant"]
     DB[("SQLite<br/>users · tokens · tasks · …")]
     WEB["Web console<br/>trace · cấu hình · eval"]
   end
@@ -27,7 +27,8 @@ flowchart LR
   API --> AG --> DB
   API --> DB
   WEB --> API
-  AG -- "OPENAI_API_KEY" --> LLM["OpenAI"]
+  AG -- "OPENAI_API_KEY" --> LLM["Responses gateway<br/>OPENAI_BASE_URL"]
+  AG -- "OPENROUTER_API_KEY" --> DEC["OpenRouter<br/>Google Gemini Decision"]
   API -- "client secret" --> G["Google Cloud<br/>Sign-In · Gmail API"]
 ```
 
@@ -45,27 +46,34 @@ Nguyên tắc: **mọi bí mật ở server** (khoá LLM, client secret Google, 
 | `app/db.py`, `repo.py` | Schema SQLite và truy vấn (luôn lọc theo `user_id`) |
 | `app/google_api.py` | Kiểm ID token, đổi mã uỷ quyền, Gmail REST |
 | `app/static/` | Web console cho nhà phát triển (không phải kênh demo) |
-| `mstudent-app/` | App Expo cho iOS + Android |
+| Repo `mstudent-ios` / `mstudent-android` | App Expo, tách khỏi backend |
 
 ## 3. Pipeline agent
 
 ```mermaid
 flowchart LR
-  M["Thông báo<br/>(Gmail · LMS .ics · Zalo share · dán tay)"] --> D{Đã xử lý?}
+  M["Văn bản<br/>(Gmail · tài liệu · thông báo lớp · Zalo · dán tay)"] --> D{Đã xử lý?}
   D -- rồi --> C["Trả kết quả cũ<br/>(không gọi LLM)"]
-  D -- chưa --> T{"Triage agent<br/>có cần làm gì?"}
-  T -- không --> X[(Lưu là tin nhiễu)]
-  T -- có --> E["Extractor agent<br/>0..n việc"]
+  D -- chưa --> T{"Decision: relevant + category<br/>một request OpenRouter"}
+  T -- stop --> X[(Lưu là tin nhiễu)]
+  T -- direct --> E["Extractor<br/>0..n việc, nhãn là gợi ý"]
+  T -- review --> V["Review<br/>xem lại + trích trong một lượt"]
+  T -- "fallback: lỗi hoặc tắt" --> F["Triage → Extractor<br/>LLM chính, đường cũ"]
+  V --> S
+  F --> S
   E --> S["Kiểm tra đầu ra<br/>(ngày, độ dài, ≤ 5 việc)"]
   S --> P["Planner<br/>ưu tiên · mốc nhắc · gộp tin gia hạn"]
   P --> DB[(SQLite theo user)]
-  T -. LLM lỗi .-> R["Bộ luật (fallback)<br/>ghi rõ mode=offline"]
+  V -. LLM lỗi .-> R["Bộ luật<br/>ghi rõ mode=offline"]
+  F -. LLM lỗi .-> R
   E -. LLM lỗi .-> R
 ```
 
 | Agent | Kiểu | Ghi chú |
 |---|---|---|
-| **Triage** | LLM (OpenAI Agents SDK), output có schema | Không có tool. Lọc quảng cáo, chuyện phiếm |
+| **Decision** | Gemini Decision qua OpenRouter | Hai câu `relevant`/`category`; xác suất và confidence được kiểm tra trước chọn tuyến |
+| **Triage** | LLM chính qua Responses gateway, output có schema | Không có tool. Dùng khi gate tắt/lỗi |
+| **Review** | LLM chính, output có schema | Không có tool. Xem lại độ liên quan, phân loại và trích việc trong một lượt |
 | **Extractor** | LLM, output có schema | Không có tool. Suy ra ngày tương đối từ thời điểm nhận tin |
 | **Planner** | Python | Ưu tiên theo hạn, mốc nhắc 7d/3d/1d/2h, gộp tin gia hạn vào việc cũ |
 | **Digest** | LLM / template | Bản tin 7 ngày |
@@ -73,6 +81,18 @@ flowchart LR
 
 Mọi lượt chạy ghi **trace** (agent, loại `llm`/`rules`, thời gian, đầu ra). App và web console hiện `mode` để không bao giờ
 gọi nhầm kết quả của bộ luật là AI. `POST /api/ai/check` gọi thật một lượt LLM để xác nhận trước khi demo.
+
+Ngưỡng mặc định: `decision_low=0.10`, `decision_high=0.80`, `decision_category_conf=0.75`, lưu qua cấu hình admin.
+Nhãn loại không chắc không làm phát sinh thêm Triage; Extractor tự phân loại từng việc. Một thông báo nhiều loại
+không bị ép thành một loại Task. `other` vẫn có thể hữu ích. Chi tiết vận hành: [DECISION_ROUTING.md](DECISION_ROUTING.md).
+
+LLM chính mặc định dùng `cx/gpt-6-luna(xhigh)` tại `OPENAI_BASE_URL`; mọi agent, kể cả Assistant có tool, dùng chung
+Responses client. SDK tracing bên ngoài bị tắt. Phí Decision lấy từ OpenRouter usage; phí main tính theo giá cấu hình
+chỉ là ước tính. Không dùng thời gian hoặc phí một request để suy ra lợi ích toàn workflow.
+
+Attachment/link tài liệu có bước xử lý riêng dù body email bị phân loại nhiễu; mỗi tài liệu có hash/cache và giới hạn
+parse. Lỗi tài liệu được ghi trace, không coi là kết luận nhiễu. Nguồn ICS/Classroom có cấu trúc đi thẳng planner;
+OAuth, token và lỗi fetch không được gửi vào gate như nội dung học vụ.
 
 ## 4. Dữ liệu (SQLite)
 
@@ -85,6 +105,7 @@ tasks(id, user_id→users, title, course, category, due_at, location, action, pr
       message_id, status, reminders[], updated_from[], created_at, done_at)
 traces(id, user_id→users, message_id, created_at, mode, summary, steps[])
 settings(key, value)            -- model + prompt, toàn hệ thống, chỉ admin sửa
+llm_usage(user_id?, day, agent, input_tokens, output_tokens, cost_usd, latency_ms, created_at)
 audit_log(id, at, user_id, event, ip, detail)
 ```
 
@@ -141,6 +162,10 @@ web, trạng thái trong bảng `sync_connections`). Chi tiết: `specs/002-auto
 | Email trường (Outlook), Teams, Udemy | Chuyển tiếp email sang Gmail đã kết nối | Như Gmail | Có (không cần code) |
 | Microsoft 365 trực tiếp | Microsoft Graph | — | Lộ trình bên dưới |
 | Email khác | IMAP (`connectors/email_imap.py`) | — | Có mã, chưa nối API |
+
+Google OAuth chỉ phục vụ đăng nhập/Gmail/Classroom. Google Sheets, Docs/Slides và metadata form hiện đọc đường công
+khai; không có Drive OAuth để đọc tài liệu riêng tư. OpenRouter và gateway LLM chính dùng API key riêng, không nhận
+refresh token Google. Lịch LMS tự đồng bộ không qua AI; endpoint nhập `.ics` thủ công vẫn chuyển về pipeline thông báo.
 
 ### Lộ trình Microsoft 365 (002 US6, sau cuộc thi)
 

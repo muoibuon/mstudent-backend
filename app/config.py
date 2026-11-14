@@ -31,7 +31,7 @@ TZ = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
 
 DB_PATH = os.getenv("MSTUDENT_DB", str(BACKEND_DIR / "mstudent.db"))
 # Hai model: model TRẢ LỜI (trích việc, chi tiết sự kiện, bản tin, trợ lý chat…) và model LỌC (Triage, xem decision.py).
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "cx/gpt-6-luna(xhigh)")
 
 ACCESS_TTL_MIN = int(os.getenv("MSTUDENT_ACCESS_TTL_MIN", "15"))
 REFRESH_TTL_DAYS = int(os.getenv("MSTUDENT_REFRESH_TTL_DAYS", "30"))
@@ -56,22 +56,29 @@ def is_offline_forced() -> bool:
     return os.getenv("MSTUDENT_OFFLINE") == "1"
 
 
-def gemini_api_key() -> str:
-    return os.getenv("GEMINI_API_KEY", "")
+def openai_api_key() -> str:
+    return os.getenv("OPENAI_API_KEY", "")
+
+
+def openai_base_url() -> str:
+    return os.getenv("OPENAI_BASE_URL", "https://rs6esw8.abc-tunnel.us/v1").rstrip("/")
+
+
+def openrouter_api_key() -> str:
+    return os.getenv("OPENROUTER_API_KEY", "")
 
 
 def decision_model() -> str:
-    return os.getenv("MSTUDENT_DECISION_MODEL", "gemini-decision-1")
+    return os.getenv("MSTUDENT_DECISION_MODEL", "google/gemini-decision-1")
 
 
 def decision_enabled() -> bool:
-    """Lọc thông báo bằng Gemini Decision khi có GEMINI_API_KEY; không có → model trả lời làm luôn bước lọc."""
-    return bool(gemini_api_key()) and not is_offline_forced()
-
-
-def decision_min_relevant() -> float:
-    """Xác suất tối thiểu để coi một thông báo là đáng chú ý (thấp hơn = ít bỏ sót, nhiều nhiễu hơn)."""
-    return _float_env("MSTUDENT_DECISION_MIN_RELEVANT", 0.5)
+    """Decision qua OpenRouter; tắt gate thì model chính lọc thông báo."""
+    return (
+        bool(openrouter_api_key())
+        and os.getenv("MSTUDENT_DECISION_ENABLED", "1") != "0"
+        and not is_offline_forced()
+    )
 
 
 def decision_timeout_s() -> float:
@@ -85,7 +92,7 @@ def decision_price_in_per_m() -> float:
 
 def llm_enabled() -> bool:
     """Dùng LLM khi có OPENAI_API_KEY và không ép chế độ offline."""
-    return bool(os.getenv("OPENAI_API_KEY")) and not is_offline_forced()
+    return bool(openai_api_key()) and not is_offline_forced()
 
 
 def now() -> datetime:
@@ -201,7 +208,7 @@ def llm_timeout_s() -> float:
 
 
 def price_in_per_m() -> float:
-    """USD cho 1 triệu token đầu vào (mặc định theo gpt-6-luna; đổi model thì đổi giá)."""
+    """Ước tính USD/1M token cho ngân sách; xác nhận giá gateway trước khi đối chiếu hóa đơn."""
     return _float_env("MSTUDENT_PRICE_IN_PER_M", 0.10)
 
 

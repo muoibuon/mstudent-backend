@@ -121,12 +121,13 @@ async function loadTraces() {
   if (!TRACES.length) { list.replaceChildren(h('div', {class:'meta'}, 'Chưa có lượt chạy nào.')); $('traceDetail').replaceChildren('Chọn một lượt chạy bên trái.'); return; }
   if (!TRACES.some((t) => t.id === SEL)) SEL = TRACES[0].id;
   list.replaceChildren(...TRACES.map((t) => {
-    const tri = t.steps.find((s) => s.agent === 'Triage');
-    const rel = tri?.output?.relevant;
+    const decision = t.steps.find((s) => s.agent === 'Decision');
+    const tri = t.steps.find((s) => s.agent === 'Triage' || s.agent === 'Review') || decision;
+    const rel = decision?.output?.route === 'stop' ? false : tri?.output?.relevant;
     return h('div', {class:'traceItem' + (t.id === SEL ? ' sel' : ''), onclick: () => { SEL = t.id; loadTraces(); }},
       h('div', {}, t.summary),
       h('div', {class:'meta'}, h('span', {class:'tag ' + (t.mode === 'llm' ? 'llm' : 'rules')}, t.mode), ' ',
-        rel === false ? '✗ bỏ qua' : '✓ ' + (CAT[tri?.output?.category] || ''), ' · ', fmtDT(t.created_at)));
+        rel === false ? '✗ bỏ qua' : '✓ ' + (CAT[tri?.output?.category] || ''), ' · ', decision?.output?.route || '', ' · ', fmtDT(t.created_at)));
   }));
   showTrace(TRACES.find((t) => t.id === SEL));
 }
@@ -185,7 +186,7 @@ $('wkNext').onclick = () => { WEEK_OFFSET++; renderWeek(); };
 $('wkToday').onclick = () => { WEEK_OFFSET = 0; renderWeek(); };
 
 /* ---------- Cấu hình + eval ---------- */
-const CFG_KEYS = ['model', 'triage_prompt', 'extract_prompt', 'digest_prompt', 'assistant_prompt'];
+const CFG_KEYS = ['model', 'decision_low', 'decision_high', 'decision_category_conf', 'review_prompt', 'triage_prompt', 'extract_prompt', 'digest_prompt', 'assistant_prompt'];
 async function loadConfig() {
   const r = await api('/api/agents/config');
   for (const k of CFG_KEYS) { $('cfg-' + k).value = r.config[k] ?? '(chỉ quản trị viên xem được)'; $('cfg-' + k).disabled = !r.can_edit; }
@@ -233,8 +234,8 @@ async function loadStats() {
       tile('Hoạt động 7 ngày', s.users_active_7d, s.users_total ? Math.round(100 * s.users_active_7d / s.users_total) + '% tổng' : ''),
       tile('Thông báo đã xử lý', s.messages_total, 'Gmail, Zalo, LMS…'),
       tile('Việc đã tạo', s.tasks_total, 'từ thông báo'),
-      tile('Chi phí AI hôm nay', usd(s.llm_cost_today_usd), 'trần ' + usd(s.llm_budget_usd) + '/ngày', s.llm_budget_exhausted ? 'bad' : 'ok'),
-      tile('Chi phí / người / tuần', usd(s.llm_cost_per_active_user_usd), 'người hoạt động'),
+      tile('Chi phí AI ước tính hôm nay', usd(s.llm_cost_today_usd), 'trần ' + usd(s.llm_budget_usd) + '/ngày', s.llm_budget_exhausted ? 'bad' : 'ok'),
+      tile('Chi phí ước tính / người / tuần', usd(s.llm_cost_per_active_user_usd), 'người hoạt động'),
       tile('Độ trễ AI (trung vị)', s.median_latency_ms == null ? '–' : (s.median_latency_ms / 1000).toFixed(1) + ' s', '7 ngày'));
     const modes = Object.entries(s.messages_by_mode);
     $('statsModes').textContent = modes.length ? 'Theo chế độ: ' + modes.map(([m, n]) => `${m} ${n}`).join(' · ') + (s.llm_budget_exhausted ? ' · ⚠️ đã chạm trần chi phí, đang chạy luật' : '') : '';

@@ -250,14 +250,62 @@ def test_relevant_email_reads_pdf_and_adds_summary(mailbox):
     assert len(_doc_messages(uid)) == 1  # nhưng tài liệu trùng nội dung không chạy lại pipeline
 
 
-def test_irrelevant_email_attachment_not_downloaded(mailbox):
+def test_noise_body_does_not_discard_valid_academic_attachment(mailbox):
     uid, cid, world, pdf = mailbox
     world["mails"]["s1"] = _mail(
         "s1", "Flash sale 11.11", "Giảm giá 50%, săn voucher ngay!", [("catalog.pdf", "application/pdf", pdf)]
     )
     world["list"] = ["s1"]
     _run(uid, cid)
-    assert world["downloads"] == 0  # FR-080
+    assert world["downloads"] == 1
+    assert len(_doc_messages(uid)) == 1
+    assert any(t.due_at and t.due_at.startswith("2026-12-16T08:00") for t in repo.list_tasks(uid, None))
+
+
+def test_noise_body_still_checks_public_document_link(mailbox, monkeypatch):
+    from app.sync import sheets
+
+    fetched = []
+
+    async def public(url):
+        fetched.append(url)
+        return "Nộp báo cáo OOP trước 23h59 ngày 20/12/2026."
+
+    monkeypatch.setattr(sheets, "fetch_google_export", public)
+    uid, cid, world, _ = mailbox
+    world["mails"]["link"] = _mail(
+        "link",
+        "Xem thêm",
+        "Xin chào. https://docs.google.com/document/d/1AcademicDocAbc/edit",
+    )
+    world["list"] = ["link"]
+    _run(uid, cid)
+    assert len(fetched) == 1 and len(_doc_messages(uid)) == 1
+    assert any(t.due_at and t.due_at.startswith("2026-12-20T23:59") for t in repo.list_tasks(uid, None))
+
+
+def test_private_doc_on_noise_body_does_not_crash_or_become_noise_document(mailbox, monkeypatch):
+    from app.sync import sheets
+
+    fetched = []
+
+    async def private(url):
+        fetched.append(url)
+        raise sheets.SheetError(sheets.PRIVATE_MSG)
+
+    monkeypatch.setattr(sheets, "fetch_google_export", private)
+    uid, cid, world, _ = mailbox
+    world["mails"]["private"] = _mail(
+        "private", "Xem thêm", "Xin chào. https://docs.google.com/document/d/1PrivateDocAbc/edit"
+    )
+    world["list"] = ["private"]
+    _run(uid, cid)
+    assert len(fetched) == 1 and _doc_messages(uid) == []
+    assert repo.list_tasks(uid, None) == []
+    document_steps = [
+        step for trace in repo.list_traces(uid) for step in trace["steps"] if step["agent"] == "Documents"
+    ]
+    assert document_steps and any("riêng tư" in error for error in document_steps[0]["output"]["errors"])
 
 
 def test_private_google_doc_link_is_noted(mailbox, monkeypatch):

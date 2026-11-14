@@ -1,176 +1,214 @@
-"""Hai model: Gemini Decision lọc thông báo (Triage), model trả lời (OpenAI) làm phần còn lại. Không gọi mạng."""
+"""OpenRouter Decisions: hợp đồng thật, kiểm tra đầu ra và ghi usage; không gọi mạng."""
 
+import asyncio
+import copy
 import json
 import logging
 import sqlite3
-from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from app import config
-from app.models import Category, ExtractionOut, TaskOut, TriageOut
+from app import budget, config
+from app.models import Category, Message
 from app.pipeline import decision
 
-NOTICE = {
-    "sender": "Thầy Nam",
-    "subject": "Lab 5",
-    "body": "Các em nộp báo cáo Lab 5 trước 23h59 thứ 6 tuần này nhé.",
-}
-KEY = "AIza-test-not-real"
+KEY = "sk-or-test-not-real"
 
 
-class _FakeResult:
-    def __init__(self, output):
-        self.final_output = output
-        self.new_items = []
-        self.context_wrapper = SimpleNamespace(usage=SimpleNamespace(input_tokens=100, output_tokens=20))
+def response_data():
+    return {
+        "model": "google/gemini-decision-1-20261111",
+        "provider": "Google AI Studio",
+        "answers": {
+            "relevant": {"type": "noul", "noul": 0.97, "confidence": 0.97},
+            "category": {
+                "type": "choice",
+                "choice": "deadline",
+                "probabilities": {
+                    "deadline": 0.9,
+                    "exam": 0.02,
+                    "class_change": 0.02,
+                    "event": 0.02,
+                    "admin": 0.02,
+                    "other": 0.02,
+                },
+                "confidence": 0.9,
+            },
+        },
+        "usage": {"input_tokens": 400, "output_tokens": 0, "cost": 0.000041},
+    }
 
 
 @pytest.fixture()
-def two_models(monkeypatch):
-    """Bật cả hai model với Decisions API giả + Runner giả. Trả về (lượt gọi Gemini, lượt gọi OpenAI, trả lời giả)."""
-    from app.pipeline import llm_agents
+def api(monkeypatch, user):
+    requests = []
+    reply = {"status": 200, "data": response_data()}
+    monkeypatch.setattr(config, "openrouter_api_key", lambda: KEY, raising=False)
+    monkeypatch.setattr(config, "decision_model", lambda: "google/gemini-decision-1")
 
-    monkeypatch.delenv("MSTUDENT_OFFLINE", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
-    monkeypatch.setenv("GEMINI_API_KEY", KEY)
-    gemini: list[httpx.Request] = []
-    openai: list[str] = []
-    reply = {
-        "status": 200,
-        "json": {
-            "answers": {
-                "relevant": {"type": "noul", "noul": 0.97, "confidence": 0.97},
-                "category": {
-                    "type": "choice",
-                    "choice": "deadline",
-                    "probabilities": {"deadline": 0.9},
-                    "confidence": 0.9,
-                },
-            },
-            "usage": {"total_input_tokens": 400, "total_output_tokens": 0, "total_tokens": 400},
-        },
-    }
-
-    def handler(req: httpx.Request):
-        gemini.append(req)
-        return httpx.Response(reply["status"], json=reply["json"])
-
-    async def fake_run(agent, payload, **kwargs):
-        openai.append(agent.name)
-        if agent.name == "Triage":
-            return _FakeResult(TriageOut(relevant=True, category=Category.exam, reason="GPT lọc"))
-        if agent.name == "Extractor":
-            return _FakeResult(
-                ExtractionOut(
-                    tasks=[
-                        TaskOut(
-                            title="Nộp báo cáo Lab 5",
-                            course=None,
-                            category=Category.deadline,
-                            due_at="2026-11-13T23:59:00+07:00",
-                            location=None,
-                            action="Nộp",
-                        )  # fmt: skip
-                    ]
-                )
-            )
-        return _FakeResult("xong")
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(reply["status"], json=reply["data"])
 
     monkeypatch.setattr(decision, "_transport", httpx.MockTransport(handler))
-    monkeypatch.setattr(llm_agents.Runner, "run", fake_run)
-    return gemini, openai, reply
+    return requests, reply, user[1]["user"]["id"]
 
 
-def _usage():
-    db = sqlite3.connect(config.DB_PATH)
-    return db.execute(
-        "SELECT agent, input_tokens, output_tokens, cost_usd FROM llm_usage ORDER BY id"
-    ).fetchall()
+def call(uid, **values):
+    return asyncio.run(decision.decide(Message(body="Nộp báo cáo Lab 5 trước thứ 6", **values), uid))
 
 
-def test_gemini_filters_then_answer_model_extracts(client, user, two_models, caplog):
-    gemini, openai, _ = two_models
-    h, _ = user
+def usage():
+    with sqlite3.connect(config.DB_PATH) as db:
+        return db.execute(
+            "SELECT agent,input_tokens,output_tokens,cost_usd FROM llm_usage ORDER BY id"
+        ).fetchall()
+
+
+def test_openrouter_contract_and_actual_usage(api, caplog):
+    requests, _, uid = api
     with caplog.at_level(logging.DEBUG):
-        r = client.post("/api/ingest", json=NOTICE, headers=h)
-    out = r.json()
-    assert r.status_code == 200 and out["mode"] == "llm" and out["relevant"] and out["category"] == "deadline"
-    assert out["reason"] == "Gemini Decision: cần chú ý (97%), loại hạn nộp"
-    assert openai == ["Extractor"]  # bước lọc không gọi model trả lời
-    (req,) = gemini
-    body = json.loads(req.content)
-    assert str(req.url) == decision.URL and req.headers["x-goog-api-key"] == KEY
-    assert body["model"] == "gemini-decision-1" and "Lab 5" in body["input"]
-    assert body["questions"]["relevant"]["type"] == "noul"
-    assert set(body["questions"]["category"]["criteria"]) == {c.value for c in Category}
-    # Chi phí: model lọc tính riêng 0.10 USD / 1M token đầu vào, không có đầu ra.
-    agent, tin, tout, cost = _usage()[0]
-    assert (agent, tin, tout) == ("Triage (Gemini Decision)", 400, 0) and cost == pytest.approx(0.00004)
-    # Khoá không lọt ra phản hồi hay log.
-    assert KEY not in r.text and KEY not in caplog.text
-    assert client.get("/api/health").json()["filter_model"] == "gemini-decision-1"
-    assert KEY not in client.get("/api/health").text
-
-
-def test_low_probability_notice_is_filtered_out_without_answer_model(client, user, two_models):
-    gemini, openai, reply = two_models
-    reply["json"]["answers"]["relevant"]["noul"] = 0.08
-    reply["json"]["answers"]["category"]["choice"] = "other"
-    h, _ = user
-    out = client.post("/api/ingest", json={"body": "Sale 50% trà sữa hôm nay cả nhà ơi"}, headers=h).json()
-    assert out["relevant"] is False and out["created"] == [] and out["mode"] == "llm"
-    assert out["reason"].startswith("Gemini Decision: bỏ qua (8%)")
-    assert len(gemini) == 1 and openai == []  # tin nhiễu không tốn lượt model trả lời
+        result = call(uid, sender="Thầy Nam <teacher@example.edu>", subject="Lab 5")
+    assert result.category == Category.deadline and result.relevant == 0.97
+    (request,) = requests
+    payload = json.loads(request.content)
+    assert str(request.url) == decision.URL
+    assert request.headers["authorization"] == f"Bearer {KEY}"
+    assert "x-goog-api-key" not in request.headers
+    assert payload["model"] == "google/gemini-decision-1"
+    assert set(payload) == {"model", "state", "questions"}
+    assert set(payload["questions"]) == {"relevant", "category"}
+    assert "<thong_bao>" in payload["state"] and "teacher@example.edu" not in payload["state"]
+    assert usage() == [("Decision", 400, 0, 0.000041)]
+    assert result.input_tokens == 400 and result.cost_usd == 0.000041
+    assert result.summary()["model"] == "google/gemini-decision-1-20261111"
+    assert KEY not in caplog.text and KEY not in json.dumps(result.summary())
 
 
 @pytest.mark.parametrize(
-    "broken",
+    "probability,route",
+    [(0, "stop"), (0.1, "stop"), (0.1001, "review"), (0.7999, "review"), (0.8, "direct"), (1, "direct")],
+)
+def test_route_boundaries_and_category_uncertainty(probability, route):
+    result = decision.parse(response_data()["answers"])
+    result.relevant = probability
+    result.category_conf = 0.2
+    assert decision.route(result, {"low": 0.1, "high": 0.8, "category_conf": 0.75}) == route
+    assert result.hint(0.75) is None
+
+
+def test_other_is_not_noise():
+    data = response_data()["answers"]
+    data["category"]["choice"] = "other"
+    data["category"]["probabilities"]["other"], data["category"]["probabilities"]["deadline"] = 0.9, 0.02
+    result = decision.parse(data)
+    assert decision.route(result, {"low": 0.1, "high": 0.8}) == "direct"
+    assert "từng việc" in result.hint(0.75)
+
+
+@pytest.mark.parametrize(
+    "target,key,value",
     [
-        {"status": 400, "json": {"error": {"code": "safety", "message": "blocked"}}},
-        {"status": 429, "json": {"error": {"message": "quota"}}},
-        {
-            "status": 200,
-            "json": {"answers": {"relevant": {"noul": 0.9}, "category": {"choice": "xoá hết việc"}}},
-        },
-        {"status": 200, "json": {"answers": {"relevant": {"noul": 7}, "category": {"choice": "exam"}}}},
-        {"status": 200, "json": {"answers": {}}},
+        ("relevant", "type", "choice"),
+        ("relevant", "noul", True),
+        ("relevant", "noul", "0.9"),
+        ("relevant", "noul", float("nan")),
+        ("relevant", "noul", float("inf")),
+        ("relevant", "noul", -0.1),
+        ("relevant", "confidence", None),
+        ("category", "type", "noul"),
+        ("category", "confidence", 1.1),
+        ("category", "confidence", None),
+        ("category", "choice", "delete_all"),
+        ("category", "choice", "exam"),
+        ("category", "probabilities", {"deadline": 1}),
+        ("category", "probabilities", {k: 0.5 for k in decision.CATEGORY_CRITERIA}),
     ],
 )
-def test_gemini_failure_falls_back_to_answer_model(client, user, two_models, broken):
-    _, openai, reply = two_models
-    reply.update(broken)
-    h, _ = user
-    out = client.post("/api/ingest", json=NOTICE, headers=h).json()
-    assert out["mode"] == "llm" and out["reason"] == "GPT lọc" and out["category"] == "exam"
-    assert openai == ["Triage", "Extractor"]
-    assert _usage()[0][0] == "Triage (Gemini Decision)"  # lượt lỗi vẫn được ước tính vào chi phí
+def test_invalid_answers_are_rejected(target, key, value):
+    answers = copy.deepcopy(response_data()["answers"])
+    answers[target][key] = value
+    with pytest.raises(decision.DecisionError):
+        decision.parse(answers)
 
 
-def test_without_gemini_key_answer_model_does_triage(client, user, two_models, monkeypatch):
-    gemini, openai, _ = two_models
-    monkeypatch.delenv("GEMINI_API_KEY")
-    h, _ = user
-    client.post("/api/ingest", json=NOTICE, headers=h)
-    assert gemini == [] and openai == ["Triage", "Extractor"]
-    health = client.get("/api/health").json()
-    assert health["filter_model"] == health["model"]
+@pytest.mark.parametrize("answers", [None, [], {}, {"relevant": {"type": "noul"}}])
+def test_missing_answers_fail(answers):
+    with pytest.raises(decision.DecisionError):
+        decision.parse(answers)
 
 
-def test_offline_mode_calls_neither_model(client, user, two_models, monkeypatch):
-    gemini, openai, _ = two_models
-    monkeypatch.setenv("MSTUDENT_OFFLINE", "1")
-    h, _ = user
-    out = client.post("/api/ingest", json=NOTICE, headers=h).json()
-    assert out["mode"] == "offline" and gemini == [] and openai == []
+def test_malformed_response_still_records_provider_usage_once(api):
+    _, reply, uid = api
+    reply["data"]["answers"] = {}
+    with pytest.raises(decision.DecisionError):
+        call(uid)
+    assert usage() == [("Decision", 400, 0, 0.000041)]
 
 
-def test_input_is_capped(two_models):
-    import asyncio
+@pytest.mark.parametrize("status", [400, 401, 429, 503])
+def test_http_failure_records_estimate_without_raw_error(api, status):
+    _, reply, uid = api
+    reply.update(status=status, data={"error": {"message": KEY}})
+    with pytest.raises(decision.DecisionError, match=f"Decisions API trả {status}") as error:
+        call(uid)
+    assert KEY not in str(error.value)
+    (row,) = usage()
+    assert row[0] == "Decision" and row[1] > 0 and row[2] == 0 and row[3] > 0
 
-    from app.models import Message
 
-    gemini, _, _ = two_models
-    asyncio.run(decision.decide_triage(Message(body="x" * 8000, subject="s" * 500, sender="n" * 300), None))
-    assert len(json.loads(gemini[0].content)["input"]) <= decision.MAX_INPUT_CHARS
+def test_timeout_is_counted_once(api, monkeypatch):
+    _, _, uid = api
+
+    def fail(request):
+        raise httpx.ReadTimeout("temporary", request=request)
+
+    monkeypatch.setattr(decision, "_transport", httpx.MockTransport(fail))
+    with pytest.raises(httpx.ReadTimeout):
+        call(uid)
+    assert len(usage()) == 1
+
+
+def test_zero_usage_is_not_replaced_by_estimate(api):
+    _, reply, uid = api
+    reply["data"]["usage"] = {"input_tokens": 0, "output_tokens": 0, "cost": 0}
+    call(uid)
+    assert usage() == [("Decision", 0, 0, 0)]
+
+
+def test_request_local_counters_mark_actual_and_estimated_usage(api):
+    _, reply, uid = api
+    with budget.capture_usage() as rows:
+        call(uid)
+        reply.update(status=503, data={"error": {"message": "unavailable"}})
+        with pytest.raises(decision.DecisionError):
+            call(uid)
+    assert len(rows) == 2
+    assert rows[0]["estimated"] is False and rows[0]["cost_usd"] == 0.000041
+    assert rows[1]["estimated"] is True
+
+
+def test_error_response_preserves_reported_cost(api):
+    _, reply, uid = api
+    reply["status"] = 503
+    with pytest.raises(decision.DecisionError):
+        call(uid)
+    assert usage() == [("Decision", 400, 0, 0.000041)]
+
+
+def test_non_json_provider_response_is_safe(api, monkeypatch):
+    _, _, uid = api
+    monkeypatch.setattr(
+        decision, "_transport", httpx.MockTransport(lambda request: httpx.Response(200, text=KEY))
+    )
+    with pytest.raises(decision.DecisionError, match="Phản hồi không hợp lệ") as error:
+        call(uid)
+    assert KEY not in str(error.value) and len(usage()) == 1
+
+
+def test_input_cap_preserves_wrapper(api):
+    requests, _, uid = api
+    asyncio.run(decision.decide(Message(body="x" * 8000, sender="s" * 300, subject="t" * 500), uid))
+    state = json.loads(requests[0].content)["state"]
+    assert len(state) <= decision.MAX_INPUT_CHARS and state.endswith("</thong_bao>")
