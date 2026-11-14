@@ -59,6 +59,37 @@ def test_chat_offline_tools(client, user):
     )
 
 
+def test_chat_file_requires_login_and_reads_document(client, user):
+    h, _ = user
+    document = ("Lịch thi học kỳ\nThi Toán lúc 09:00 ngày 20/11 tại phòng B201.\n").encode()
+    files = {"file": ("lich-thi.txt", document, "text/plain")}
+    assert client.post("/api/chat/file", files=files).status_code == 401
+    response = client.post("/api/chat/file", files=files, headers=h)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "offline" and "lich-thi.txt" in body["reply"]
+    assert "20/11" in body["reply"]
+    assert "<thong_bao>" in body["document_context"]
+    assert client.get("/api/tasks", headers=h).json() == [], "đính kèm không tự tạo việc"
+    response = client.post(
+        "/api/chat/file", files=files, data={"message": "Hãy tạo việc từ tài liệu này"}, headers=h
+    )
+    assert response.status_code == 200 and response.json()["tool_calls"][0]["tool"] == "add_notice"
+    assert len(client.get("/api/tasks", headers=h).json()) == 1
+
+
+def test_chat_file_rejects_unsupported_and_oversized(client, user):
+    h, _ = user
+    bad_type = client.post("/api/chat/file", files={"file": ("photo.png", b"x", "image/png")}, headers=h)
+    assert bad_type.status_code == 400
+    too_big = client.post(
+        "/api/chat/file",
+        files={"file": ("notes.txt", b"a" * (5 * 1024 * 1024 + 1), "text/plain")},
+        headers=h,
+    )
+    assert too_big.status_code == 400 and "5 MB" in too_big.json()["detail"]
+
+
 def test_patch_recomputes_reminders(client, user):
     h, _ = user
     client.post("/api/demo/seed", headers=h)

@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import agent_config, config
+from .connectors import docs
 from .routers import auth, core, google, hooks, profile, sources
 from .sync import scheduler
 
@@ -51,7 +52,10 @@ CSP = (
 async def hardening(request: Request, call_next):
     # Chặn body quá lớn trước khi đọc.
     length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > config.MAX_BODY_BYTES:
+    max_body = (
+        docs.MAX_FILE_BYTES + 64 * 1024 if request.url.path == "/api/chat/file" else config.MAX_BODY_BYTES
+    )
+    if length and length.isdigit() and int(length) > max_body:
         return JSONResponse({"detail": "Nội dung gửi lên quá lớn"}, status_code=413)
     response = await call_next(request)
     h = response.headers

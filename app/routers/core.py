@@ -9,10 +9,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from pydantic import ValidationError
 
 from .. import agent_config, budget, config, evaluation, repo
-from ..connectors import lms_ics, zalo
+from ..connectors import docs, lms_ics, zalo
 from ..deps import admin_user, ai_limit, client_ip, current_user, enforce
 from ..models import ChatRequest, ChatResponse, IcsUrl, IngestResult, Message, Task, TaskPatch, ZaloPaste
 from ..pipeline import assistant, orchestrator, planner
@@ -115,6 +116,32 @@ def patch_task(task_id: int, p: TaskPatch, user: dict = Depends(current_user)):
 @router.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, user: dict = Depends(ai_limit)):
     return await assistant.chat(user["id"], req.message, req.history)
+
+
+@router.post("/chat/file", response_model=ChatResponse)
+async def chat_file(
+    file: UploadFile = File(...),
+    message: str = Form(""),
+    history: str = Form("[]"),
+    user: dict = Depends(ai_limit),
+):
+    """Đọc một tài liệu trong chat; không lưu tệp gốc trên máy chủ."""
+    if len(message) > 1000 or len(history) > 100_000:
+        raise HTTPException(422, "Câu hỏi hoặc lịch sử trò chuyện quá dài")
+    try:
+        turns = ChatRequest(message="Tệp", history=json.loads(history)).history
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, "Lịch sử trò chuyện không hợp lệ") from e
+    name = Path((file.filename or "").replace("\\", "/")).name[:120]
+    if not docs.kind_of(name, file.content_type or ""):
+        raise HTTPException(400, "Chỉ nhận PDF, DOCX, XLSX, CSV hoặc TXT")
+    data = await file.read(docs.MAX_FILE_BYTES + 1)
+    await file.close()
+    try:
+        document = await anyio.to_thread.run_sync(docs.extract_text, name, file.content_type or "", data)
+    except docs.DocError as e:
+        raise HTTPException(400, str(e)) from e
+    return await assistant.chat_with_file(user["id"], message, document, turns)
 
 
 @router.get("/digest")
