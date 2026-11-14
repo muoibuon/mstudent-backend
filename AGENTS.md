@@ -37,7 +37,8 @@ app/
   deps.py               current_user, admin_user, ai_limit
   google_api.py         kiểm ID token, đổi mã, Gmail REST
   routers/              auth.py · core.py · google.py
-  pipeline/             orchestrator · decision (lọc: Gemini Decision) · llm_agents (trả lời: OpenAI) · rules (fallback) · planner · assistant
+  pipeline/             orchestrator (classify: 4 tuyến) · decision (AI quyết định: Gemini Decision) · llm_agents (AI trả lời: OpenAI)
+                        · rules (fallback) · planner · events · assistant
   agent_config.py       prompt mặc định + GUARD chống prompt injection
   evaluation.py         chấm điểm (CLI + nút trên web console)
   connectors/           lms_ics · zalo · email_imap

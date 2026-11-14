@@ -121,7 +121,8 @@ async function loadTraces() {
   if (!TRACES.length) { list.replaceChildren(h('div', {class:'meta'}, 'Chưa có lượt chạy nào.')); $('traceDetail').replaceChildren('Chọn một lượt chạy bên trái.'); return; }
   if (!TRACES.some((t) => t.id === SEL)) SEL = TRACES[0].id;
   list.replaceChildren(...TRACES.map((t) => {
-    const tri = t.steps.find((s) => s.agent === 'Triage');
+    const dec = t.steps.find((s) => s.agent === 'Decision' && s.output?.route);
+    const tri = t.steps.find((s) => s.agent === 'Triage') || (dec && {output: {relevant: dec.output.route !== 'stop', category: dec.output.category}});
     const rel = tri?.output?.relevant;
     return h('div', {class:'traceItem' + (t.id === SEL ? ' sel' : ''), onclick: () => { SEL = t.id; loadTraces(); }},
       h('div', {}, t.summary),
@@ -130,12 +131,19 @@ async function loadTraces() {
   }));
   showTrace(TRACES.find((t) => t.id === SEL));
 }
+const ROUTE_LABEL = {stop:'Dừng', direct:'Đi thẳng', review:'Xem lại', fallback:'Luồng cũ'};
+function routeBadge(s) {
+  const o = s.output || {};
+  if (s.agent !== 'Decision' || !o.route) return null;
+  const pct = (x) => (x == null ? '–' : Math.round(x * 100) + '%');
+  return h('span', {class:'route ' + o.route}, `${ROUTE_LABEL[o.route] || o.route} · chú ý ${pct(o.relevant)} · tin cậy ${pct(o.relevant_conf)}`);
+}
 function showTrace(t) {
   const total = t.steps.reduce((a, s) => a + s.ms, 0);
   $('traceDetail').replaceChildren(
     h('p', {class:'meta'}, `${t.summary} · tổng ${total.toFixed(1)} ms · message ${t.message_id}`),
     ...t.steps.map((s) => h('div', {class:'step' + (s.error ? ' err' : '')},
-      h('div', {class:'row'}, h('b', {}, s.agent), h('span', {class:'tag ' + s.kind}, s.kind), h('span', {class:'meta'}, s.ms + ' ms')),
+      h('div', {class:'row'}, h('b', {}, s.agent), h('span', {class:'tag ' + s.kind}, s.kind), routeBadge(s), h('span', {class:'meta'}, s.ms + ' ms')),
       h('pre', {}, s.error ? s.error : JSON.stringify(s.output, null, 2)))));
 }
 $('trRefresh').onclick = loadTraces;
@@ -185,7 +193,7 @@ $('wkNext').onclick = () => { WEEK_OFFSET++; renderWeek(); };
 $('wkToday').onclick = () => { WEEK_OFFSET = 0; renderWeek(); };
 
 /* ---------- Cấu hình + eval ---------- */
-const CFG_KEYS = ['model', 'triage_prompt', 'extract_prompt', 'digest_prompt', 'assistant_prompt'];
+const CFG_KEYS = ['model', 'triage_prompt', 'extract_prompt', 'digest_prompt', 'assistant_prompt', 'decision_low', 'decision_high', 'decision_min_conf'];
 async function loadConfig() {
   const r = await api('/api/agents/config');
   for (const k of CFG_KEYS) { $('cfg-' + k).value = r.config[k] ?? '(chỉ quản trị viên xem được)'; $('cfg-' + k).disabled = !r.can_edit; }
@@ -204,13 +212,16 @@ $('cfgReset').onclick = async () => {
   try { await api('/api/agents/config/reset', {method:'POST'}); await loadConfig(); $('cfgStatus').textContent = '✓ Đã khôi phục mặc định'; loadHealth(); }
   catch (e) { $('cfgStatus').textContent = '⚠️ ' + e.message; }
 };
-const SCORE_LABEL = {relevant:'Lọc đúng', category:'Phân loại', due:'Hạn/giờ', course:'Mã môn'};
+const SCORE_LABEL = {relevant:'Lọc đúng', category:'Phân loại', due:'Hạn/giờ', course:'Mã môn', update:'Cập nhật việc cũ'};
 $('evalBtn').onclick = async () => {
   $('evalBtn').disabled = true; $('evalOut').replaceChildren(h('p', {class:'meta'}, 'Đang chạy…'));
   try {
     const r = await api('/api/eval', {method:'POST'});
     $('evalOut').replaceChildren(
-      h('p', {class:'meta'}, 'Chế độ: ', h('span', {class:'tag ' + (r.mode === 'llm' ? 'llm' : 'rules')}, r.mode)),
+      h('p', {class:'meta'}, 'Chế độ: ', h('span', {class:'tag ' + (r.mode === 'llm' ? 'llm' : 'rules')}, r.mode), r.decision ? ' + AI quyết định' : '',
+        ` · lượt GPT ${r.gpt_calls} · lượt AI quyết định ${r.decision_calls} · trung vị ${r.p50_ms ?? '–'} ms/ca`,
+        r.gpt_per_msg_mix30 != null ? ` · hộp thư 30/70 ≈ ${r.gpt_per_msg_mix30} lượt GPT/tin` : '',
+        Object.keys(r.routes || {}).length ? ' · tuyến: ' + Object.entries(r.routes).map(([k, v]) => `${ROUTE_LABEL[k] || 'không có'} ${v}`).join(', ') : ''),
       h('div', {class:'scores'}, ...Object.entries(r.scores).map(([k, s]) =>
         h('div', {class:'score'}, h('span', {class:'meta'}, SCORE_LABEL[k] || k), h('b', {class: s.pct === 100 ? 'ok' : s.pct < 80 ? 'bad' : ''}, s.pct == null ? '–' : s.pct + '%'), h('span', {class:'meta'}, `${s.ok}/${s.n}`)))),
       h('div', {class:'tablewrap'}, h('table', {},

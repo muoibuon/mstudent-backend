@@ -53,9 +53,12 @@ Nguyên tắc: **mọi bí mật ở server** (khoá LLM, client secret Google, 
 flowchart LR
   M["Thông báo<br/>(Gmail · LMS .ics · Zalo share · dán tay)"] --> D{Đã xử lý?}
   D -- rồi --> C["Trả kết quả cũ<br/>(không gọi LLM)"]
-  D -- chưa --> T{"Triage agent<br/>có cần làm gì?"}
-  T -- không --> X[(Lưu là tin nhiễu)]
-  T -- có --> E["Extractor agent<br/>0..n việc"]
+  D -- chưa --> G{"AI quyết định<br/>(Gemini Decision, 1 lượt)"}
+  G -- dừng --> X[(Lưu là tin nhiễu)]
+  G -- đi thẳng --> E["Extractor agent<br/>0..n việc (+ ngữ cảnh)"]
+  G -- xem lại / lỗi / tắt --> T{"Triage agent (GPT)<br/>có cần làm gì?"}
+  T -- không --> X
+  T -- có --> E
   E --> S["Kiểm tra đầu ra<br/>(ngày, độ dài, ≤ 5 việc)"]
   S --> P["Planner<br/>ưu tiên · mốc nhắc · gộp tin gia hạn"]
   P --> DB[(SQLite theo user)]
@@ -65,13 +68,17 @@ flowchart LR
 
 | Agent | Kiểu | Ghi chú |
 |---|---|---|
+| **Decision** | Google `gemini-decision-1` (Decisions API), không sinh chữ | Một lượt / tin: cần chú ý, loại, có hạn, nhiều việc, là cập nhật, mức gấp, trùng việc cũ nào (≤ 30 ứng viên), sự kiện bắt buộc, mức hợp ngành. Chọn tuyến theo ngưỡng (admin chỉnh): dừng < 0,15 · đi thẳng ≥ 0,60 · tin cậy ≥ 0,80 · còn lại xem lại. Bảng lớp: vai trò từng cột. Chỉ bật khi có `GEMINI_API_KEY` (004) |
 | **Triage** | LLM (OpenAI Agents SDK), output có schema | Không có tool. Lọc quảng cáo, chuyện phiếm |
 | **Extractor** | LLM, output có schema | Không có tool. Suy ra ngày tương đối từ thời điểm nhận tin |
 | **Planner** | Python | Ưu tiên theo hạn, mốc nhắc 7d/3d/1d/2h, gộp tin gia hạn vào việc cũ |
 | **Digest** | LLM / template | Bản tin 7 ngày |
 | **Assistant** | LLM + 4 tool | `list_tasks`, `add_notice`, `complete_task`, `get_digest` — `user_id` gắn ở server |
 
-Mọi lượt chạy ghi **trace** (agent, loại `llm`/`rules`, thời gian, đầu ra). App và web console hiện `mode` để không bao giờ
+Lời mời sự kiện: mức hợp ngành cao → GPT viết lý do; vừa / thấp → câu mẫu (không gọi GPT). Planner nhận gợi ý "việc cũ"
+của AI quyết định chỉ khi tin ra đúng một việc, việc đó thuộc người dùng và không khác môn.
+
+Mọi lượt chạy ghi **trace** (agent, loại `llm`/`rules`/`gemini`, tuyến của AI quyết định, thời gian, đầu ra). App và web console hiện `mode` để không bao giờ
 gọi nhầm kết quả của bộ luật là AI. `POST /api/ai/check` gọi thật một lượt LLM để xác nhận trước khi demo.
 
 ## 4. Dữ liệu (SQLite)

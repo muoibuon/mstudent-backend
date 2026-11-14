@@ -1,24 +1,152 @@
 [
-  {"body": "Các em nộp báo cáo Lab 3 lên Moodle trước 23h59 ngày 13/11.", "subject": "[CSE3032] Lab 3",
-   "expect": {"relevant": true, "category": "deadline", "due": "2026-11-13T23:59", "course": "CSE3032"}},
-  {"body": "Thi cuối kỳ Giải tích 2 (MAT1042) vào 8h00 ngày 28/11/2026 tại phòng 301 nhà A.",
-   "expect": {"relevant": true, "category": "exam", "due": "2026-11-28T08:00", "course": "MAT1042"}},
-  {"body": "Thứ 5 tuần này nghỉ học Cơ học kỹ thuật, học bù 13h30 thứ 7 tuần sau phòng 205.",
-   "expect": {"relevant": true, "category": "class_change", "due": "2026-11-21T13:30"}},
-  {"body": "Bài tập tuần 9 nộp trước thứ 6 tuần này nhé.",
-   "expect": {"relevant": true, "category": "deadline", "due": "2026-11-13T23:59"}},
-  {"body": "Hạn đăng ký đội thi hackathon: 17h ngày 20/11.", "subject": "Codex Community Hackathon",
-   "expect": {"relevant": true, "category": "event", "due": "2026-11-20T17:00"}},
-  {"body": "Sinh viên hoàn thành đóng học phí trước ngày 30/11/2026.",
-   "expect": {"relevant": true, "category": "admin", "due": "2026-11-30"}},
-  {"body": "Flash sale 11.11 giảm giá đến 50%, săn voucher ngay!",
-   "expect": {"relevant": false}},
-  {"body": "Có ai đi ăn trưa không 😋", "expect": {"relevant": false}},
-  {"body": "Mai kiểm tra 15 phút chương 3 môn Kiến trúc máy tính, tiết 1.",
-   "expect": {"relevant": true, "category": "exam", "due": "2026-11-11"}},
-  {"body": "Deadline nộp proposal NCKH là 9h sáng thứ 2 tuần sau, gửi qua email cô.",
-   "expect": {"relevant": true, "category": "deadline", "due": "2026-11-16T09:00"}},
-  {"body": "Lớp mình chuyển phòng học môn OOP từ P.301 sang P.405 từ tuần sau.",
-   "expect": {"relevant": true, "category": "class_change"}},
-  {"body": "Chúc mừng sinh nhật bạn Lan nhé cả lớp 🎂", "expect": {"relevant": false}}
+  {
+    "body": "Các em nộp báo cáo Lab 3 lên Moodle trước 23h59 ngày 13/11.",
+    "subject": "[CSE3032] Lab 3",
+    "expect": {
+      "relevant": true,
+      "category": "deadline",
+      "due": "2026-11-13T23:59",
+      "course": "CSE3032"
+    }
+  },
+  {
+    "body": "Thi cuối kỳ Giải tích 2 (MAT1042) vào 8h00 ngày 28/11/2026 tại phòng 301 nhà A.",
+    "expect": {
+      "relevant": true,
+      "category": "exam",
+      "due": "2026-11-28T08:00",
+      "course": "MAT1042"
+    }
+  },
+  {
+    "body": "Thứ 5 tuần này nghỉ học Cơ học kỹ thuật, học bù 13h30 thứ 7 tuần sau phòng 205.",
+    "expect": {
+      "relevant": true,
+      "category": "class_change",
+      "due": "2026-11-21T13:30"
+    }
+  },
+  {
+    "body": "Bài tập tuần 9 nộp trước thứ 6 tuần này nhé.",
+    "expect": {
+      "relevant": true,
+      "category": "deadline",
+      "due": "2026-11-13T23:59"
+    }
+  },
+  {
+    "body": "Hạn đăng ký đội thi hackathon: 17h ngày 20/11.",
+    "subject": "Codex Community Hackathon",
+    "expect": {
+      "relevant": true,
+      "category": "event",
+      "due": "2026-11-20T17:00"
+    }
+  },
+  {
+    "body": "Sinh viên hoàn thành đóng học phí trước ngày 30/11/2026.",
+    "expect": {
+      "relevant": true,
+      "category": "admin",
+      "due": "2026-11-30"
+    }
+  },
+  {
+    "body": "Flash sale 11.11 giảm giá đến 50%, săn voucher ngay!",
+    "expect": {
+      "relevant": false
+    }
+  },
+  {
+    "body": "Có ai đi ăn trưa không 😋",
+    "expect": {
+      "relevant": false
+    }
+  },
+  {
+    "body": "Mai kiểm tra 15 phút chương 3 môn Kiến trúc máy tính, tiết 1.",
+    "expect": {
+      "relevant": true,
+      "category": "exam",
+      "due": "2026-11-11"
+    }
+  },
+  {
+    "body": "Deadline nộp proposal NCKH là 9h sáng thứ 2 tuần sau, gửi qua email cô.",
+    "expect": {
+      "relevant": true,
+      "category": "deadline",
+      "due": "2026-11-16T09:00"
+    }
+  },
+  {
+    "body": "Lớp mình chuyển phòng học môn OOP từ P.301 sang P.405 từ tuần sau.",
+    "expect": {
+      "relevant": true,
+      "category": "class_change"
+    }
+  },
+  {
+    "body": "Chúc mừng sinh nhật bạn Lan nhé cả lớp 🎂",
+    "expect": {
+      "relevant": false
+    }
+  },
+  {
+    "body": "mai nhớ nha mọi người 😆",
+    "expect": {
+      "relevant": false
+    }
+  },
+  {
+    "body": "Thầy bảo tuần sau sẽ thông báo lịch kiểm tra bù, các bạn chú ý theo dõi nhóm lớp.",
+    "expect": {
+      "relevant": true,
+      "category": "exam"
+    }
+  },
+  {
+    "body": "Thầy cho lùi deadline bài thực hành số 5 môn INT3306 sang 23h59 thứ 2 tuần sau nhé.",
+    "existing": [
+      {
+        "title": "Nộp báo cáo Lab 5",
+        "course": "INT3306",
+        "category": "deadline",
+        "due_at": "2026-11-13T23:59:00+07:00"
+      },
+      {
+        "title": "Ôn thi giữa kỳ Giải tích",
+        "course": "MAT1042",
+        "category": "exam",
+        "due_at": "2026-11-20T08:00:00+07:00"
+      }
+    ],
+    "expect": {
+      "relevant": true,
+      "due": "2026-11-16T23:59",
+      "updates": "Nộp báo cáo Lab 5"
+    }
+  },
+  {
+    "body": "MAT1042: thi giữa kỳ chuyển sang phòng 305 nhà B, giờ thi giữ nguyên 8h00 ngày 20/11.",
+    "existing": [
+      {
+        "title": "Thi giữa kỳ Giải tích 2",
+        "course": "MAT1042",
+        "category": "exam",
+        "due_at": "2026-11-20T08:00:00+07:00"
+      },
+      {
+        "title": "Nộp báo cáo Lab 5",
+        "course": "INT3306",
+        "category": "deadline",
+        "due_at": "2026-11-13T23:59:00+07:00"
+      }
+    ],
+    "expect": {
+      "relevant": true,
+      "due": "2026-11-20T08:00",
+      "updates": "Thi giữa kỳ Giải tích 2"
+    }
+  }
 ]

@@ -194,6 +194,14 @@ def _from_model(m: SheetMapping, ncols: int) -> dict[str, int]:
 async def map_columns(
     header: list[str], samples: list[list[str]], user_id: int
 ) -> tuple[dict[str, int], str]:
+    """AI quyết định (một lượt, 004) → SheetMapper GPT → luật."""
+    from ..pipeline import decision
+
+    if len(header) <= MAX_MAPPER_COLS and decision.enabled(user_id):
+        try:
+            return await decision.map_sheet_columns(header, samples, user_id), "llm"
+        except Exception as e:
+            log.info("AI quyết định không nhận được vai trò cột, chuyển GPT: %s", type(e).__name__)
     if len(header) <= MAX_MAPPER_COLS and budget.llm_allowed(user_id):
         try:
             m = _from_model(await llm_agents.llm_map_sheet(header, samples, user_id), len(header))

@@ -128,7 +128,13 @@ def _rank(sources: list[str]) -> int:
 
 
 def plan(
-    user_id: int, drafts: list[TaskOut], *, source: str, message_id: str, ref: datetime
+    user_id: int,
+    drafts: list[TaskOut],
+    *,
+    source: str,
+    message_id: str,
+    ref: datetime,
+    hint_task_id: int | None = None,
 ) -> tuple[list[Task], list[Task]]:
     """Trả về (task mới, task được cập nhật). Gộp với việc đã có (kể cả từ nguồn khác) theo FR-009."""
     created, updated = [], []
@@ -136,8 +142,19 @@ def plan(
     existing = [
         t for t in repo.list_tasks(user_id, None, include_invites=True) if t.status in ("open", "done")
     ]
-    for d in sanitize(drafts):
-        match = match_existing(existing, d)
+    clean = sanitize(drafts)
+    # 004: AI quyết định chỉ ra việc cũ bị ảnh hưởng. Chỉ dùng khi tin ra đúng MỘT việc, việc đó còn mở, thuộc chính
+    # người dùng (có trong `existing`) và không khác môn; mọi trường hợp khác → so khớp như cũ.
+    hinted = (
+        next((t for t in existing if t.id == hint_task_id and t.status == "open"), None)
+        if hint_task_id
+        else None
+    )
+    for d in clean:
+        match = None
+        if hinted is not None and len(clean) == 1 and not _course_conflict(hinted, d):
+            match = hinted
+        match = match or match_existing(existing, d)
         fields = {
             "title": d.title,
             "course": d.course,

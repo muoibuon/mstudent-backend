@@ -65,7 +65,9 @@ async def classify(
         if decision.enabled(user_id):
             t0 = time.perf_counter()
             try:
-                dres = await decision.decide(msg, user_id)
+                cands = decision.candidates(user_id, msg) if user_id is not None else []
+                profile = repo.get_profile(user_id) if user_id is not None else None
+                dres = await decision.decide(msg, user_id, cands, profile)
                 route, why = decision.route(dres, th)
                 tr.add("Decision", "gemini", t0, {"route": route, "reason": why, **dres.summary()})
             except Exception as e:  # lỗi / bị chặn / trả lời không hợp lệ → luồng cũ cho đúng tin này
@@ -136,8 +138,9 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
             ref = config.now()
         if ref.tzinfo is None:
             ref = ref.replace(tzinfo=config.TZ)
+        hint = decision.hint_task_id(dres, agent_config.thresholds()["min_conf"]) if mode == "llm" else None
         created, updated = planner.plan(
-            user_id, ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref
+            user_id, ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref, hint_task_id=hint
         )
         # 004: việc không có hạn lấy mức gấp từ AI quyết định (việc có hạn vẫn tính theo hạn).
         pri = (
@@ -166,7 +169,7 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
 
             t0 = time.perf_counter()
             try:
-                created[i], kind = await events.enrich_event(user_id, t, msg)
+                created[i], kind = await events.enrich_event(user_id, t, msg, dres if mode == "llm" else None)
                 tr.add(
                     "EventDetails",
                     kind,

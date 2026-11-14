@@ -98,6 +98,13 @@
         <label for="cfg-extract_prompt">Extractor agent — tách việc cần làm</label><textarea class="cfgPrompt" id="cfg-extract_prompt"></textarea>
         <label for="cfg-digest_prompt">Digest agent — bản tin</label><textarea class="cfgPrompt" id="cfg-digest_prompt"></textarea>
         <label for="cfg-assistant_prompt">Trợ lý chat — dùng tool</label><textarea class="cfgPrompt" id="cfg-assistant_prompt"></textarea>
+        <label>AI quyết định — ngưỡng điều phối (0–1)</label>
+        <div class="thresholds">
+          <label for="cfg-decision_low">Dừng khi xác suất &lt;<input id="cfg-decision_low" inputmode="decimal"></label>
+          <label for="cfg-decision_high">Đi thẳng khi ≥<input id="cfg-decision_high" inputmode="decimal"></label>
+          <label for="cfg-decision_min_conf">Độ tin cậy tối thiểu<input id="cfg-decision_min_conf" inputmode="decimal"></label>
+        </div>
+        <p class="meta">Lưng chừng giữa hai ngưỡng hoặc tin cậy thấp → AI trả lời xem lại. Thấp hơn = ít bỏ sót hơn, tốn thêm lượt GPT.</p>
         <p class="meta" id="cfgStatus"></p>
       </div>
       <div class="card">

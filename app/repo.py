@@ -418,6 +418,18 @@ def record_llm_usage(
         )
 
 
+def llm_calls_since(since_iso: str, user_ids: tuple[int, ...] = ()) -> dict[str, int]:
+    """Số lượt gọi AI theo agent kể từ một mốc (dùng cho eval). Lượt hệ thống (user_id NULL) + các user chỉ định."""
+    marks = ",".join("?" * len(user_ids))
+    cond = "user_id IS NULL" + (f" OR user_id IN ({marks})" if user_ids else "")
+    with connect() as c:
+        rows = c.execute(
+            f"SELECT agent, COUNT(*) FROM llm_usage WHERE created_at >= ? AND ({cond}) GROUP BY agent",  # marks là "?,?"
+            (since_iso, *user_ids),
+        ).fetchall()
+    return {r[0]: r[1] for r in rows}
+
+
 def llm_cost_on(day: str) -> float:
     with connect() as c:
         return c.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM llm_usage WHERE day=?", (day,)).fetchone()[0]

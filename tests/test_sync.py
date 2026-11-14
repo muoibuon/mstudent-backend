@@ -893,3 +893,84 @@ def test_wide_sheet_uses_rules_not_ai(client, user, monkeypatch):
     uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, calls)
     res = _run(conn["id"], uid)
     assert calls == [] and res.mode == "offline" and "Bài tập lớn" in _tasks(uid)
+
+
+# ---------------- 004 US5: vai trò cột bằng AI quyết định (T013) ----------------
+
+CSV_DEC = (
+    "STT,Môn,Nội dung,Deadline,Ghi chú\n"
+    "1,INT3306,Nộp báo cáo Lab 5,20/11,qua LMS\n"
+    "2,OOP,Bài tập lớn,25/11 17:00,nhóm 3 người\n"
+)
+ROLE_OF = {"STT": "ignore", "Môn": "course", "Nội dung": "title", "Deadline": "due", "Ghi chú": "note"}
+
+
+@pytest.fixture()
+def column_decider(monkeypatch):
+    """Decisions API giả cho câu col_<i>: trả vai trò theo tiêu đề cột; `title_conf` chỉnh độ tin cậy cột tên việc."""
+    import json
+    import re
+
+    from app.pipeline import decision
+
+    monkeypatch.delenv("MSTUDENT_OFFLINE", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "AIza-test-not-real")
+    state = {"requests": [], "title_conf": 0.95, "status": 200}
+
+    def handler(req):
+        payload = json.loads(req.content)
+        state["requests"].append(payload)
+        if state["status"] != 200:
+            return httpx.Response(state["status"], json={})
+        answers = {}
+        for key, q in payload["questions"].items():
+            head = re.search(r'tiêu đề "([^"]*)"', q["instructions"]).group(1)
+            role = ROLE_OF.get(head, "ignore")
+            conf = state["title_conf"] if role == "title" else 0.93
+            answers[key] = {
+                "type": "choice",
+                "choice": role,
+                "probabilities": {role: conf},
+                "confidence": conf,
+            }
+        return httpx.Response(200, json={"answers": answers, "usage": {"total_input_tokens": 300}})
+
+    monkeypatch.setattr(decision, "_transport", httpx.MockTransport(handler))
+    return state
+
+
+def test_sheet_columns_mapped_by_decision_without_gpt(client, user, monkeypatch, column_decider):
+    csv_text, gpt_calls = {"v": CSV_DEC}, []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, gpt_calls)
+    res = _run(conn["id"], uid)
+    assert gpt_calls == [] and res.mode == "llm"
+    (payload,) = column_decider["requests"]
+    assert set(payload["questions"]) == {f"col_{i}" for i in range(5)}
+    t = _tasks(uid)
+    assert (
+        t["Nộp báo cáo Lab 5"].course == "INT3306" and t["Bài tập lớn"].due_at == "2026-11-25T17:00:00+07:00"
+    )
+    assert t["Bài tập lớn"].action == "nhóm 3 người"  # cột ghi chú → hành động của việc
+
+
+def test_unsure_title_column_falls_back_to_gpt(client, user, monkeypatch, column_decider):
+    column_decider["title_conf"] = 0.5
+    csv_text, gpt_calls = {"v": CSV_V1}, []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, gpt_calls)
+    _run(conn["id"], uid)
+    assert len(column_decider["requests"]) == 1 and len(gpt_calls) == 1
+
+
+def test_decision_error_on_columns_falls_back_to_gpt_then_rules(client, user, monkeypatch, column_decider):
+    from app.pipeline import llm_agents
+
+    column_decider["status"] = 500
+    csv_text, gpt_calls = {"v": CSV_V1}, []
+    uid, conn = _sheet_conn(client, user, monkeypatch, csv_text, gpt_calls)
+
+    async def broken(*a, **k):
+        raise RuntimeError("GPT lỗi")
+
+    monkeypatch.setattr(llm_agents, "llm_map_sheet", broken)
+    res = _run(conn["id"], uid)
+    assert res.mode == "offline" and "Nộp báo cáo Lab 5" in _tasks(uid)

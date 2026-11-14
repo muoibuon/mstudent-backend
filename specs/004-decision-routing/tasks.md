@@ -37,40 +37,40 @@ GPT bằng Runner giả).
 
 ## Phase 3: User Story 3 — Cập nhật đúng việc cũ (P2)
 
-- [ ] T009 [P] [US3] `tests/test_routing.py`: "lùi deadline bài thực hành số 5" chọn `t<id>` của "Lab 5" → cập nhật hạn,
+- [x] T009 [P] [US3] `tests/test_routing.py`: "lùi deadline bài thực hành số 5" chọn `t<id>` của "Lab 5" → cập nhật hạn,
   không việc mới; `none` → việc mới; id không thuộc ứng viên (của người khác) → bỏ qua gợi ý; khác môn → không gộp; nhiều
   việc trích ra → không dùng gợi ý; > 30 việc mở → chỉ 30 ứng viên, cùng môn trước.
-- [ ] T010 [US3] `app/pipeline/decision.py`: `candidates(user_id, msg)` (R4) + câu `match_task`;
+- [x] T010 [US3] `app/pipeline/decision.py`: `candidates(user_id, msg)` (R4) + câu `match_task`;
   `app/pipeline/planner.py`: `plan(..., hint_task_id=None)` áp dụng khi an toàn; orchestrator truyền gợi ý.
 
 ## Phase 4: User Story 4 — Sự kiện trong cùng lượt (P2)
 
-- [ ] T011 [P] [US4] `tests/test_routing.py`: câu `mandatory`/`major_fit` chỉ gửi khi đã khai ngành; mức cao → GPT viết
+- [x] T011 [P] [US4] `tests/test_routing.py`: câu `mandatory`/`major_fit` chỉ gửi khi đã khai ngành; mức cao → GPT viết
   lý do (nhắc ngành), mức vừa/thấp → câu mẫu nhắc ngành, không gọi GPT MajorFit; "bắt buộc" tin cậy cao → tự vào lịch;
   cùng sự kiện, ngành CNTT vs Nhật Bản học ra mức khác nhau; đổi ngành → reassess bằng lượt quyết định chỉ có câu
   `major_fit`.
-- [ ] T012 [US4] `app/pipeline/events.py`: `enrich_event(..., decision=None)`, `fit_from_decision()`, `fit_template()`;
+- [x] T012 [US4] `app/pipeline/events.py`: `enrich_event(..., decision=None)`, `fit_from_decision()`, `fit_template()`;
   `assess_fit` / `reassess_pending` dùng lượt quyết định khi bật, giữ GPT → luật làm đường lùi.
 
 ## Phase 5: User Story 5 — Vai trò cột bảng lớp (P3)
 
-- [ ] T013 [P] [US5] `tests/test_sync.py`: bảng "STT | Môn | Nội dung | Deadline | Ghi chú" nhận đúng vai trò bằng lượt
+- [x] T013 [P] [US5] `tests/test_sync.py`: bảng "STT | Môn | Nội dung | Deadline | Ghi chú" nhận đúng vai trò bằng lượt
   quyết định (0 lượt GPT); cột tên việc không chắc → SheetMapper GPT; lỗi → luật.
-- [ ] T014 [US5] `app/pipeline/decision.py`: `map_sheet_columns(header, samples, user_id)`; `app/sync/sheets.py`:
+- [x] T014 [US5] `app/pipeline/decision.py`: `map_sheet_columns(header, samples, user_id)`; `app/sync/sheets.py`:
   `map_columns` thử quyết định trước.
 
 ## Phase 6: Polish
 
-- [ ] T015 `app/evaluation.py`: đi qua `orchestrator.classify`; báo `routes`, `gpt_calls`, `decision_calls`, `p50_ms`
+- [x] T015 `app/evaluation.py`: đi qua `orchestrator.classify`; báo `routes`, `gpt_calls`, `decision_calls`, `p50_ms`
   (trung vị, SC-004), và số lượt GPT trung bình riêng cho ca học vụ / ca nhiễu (để tính SC-003 cho hỗn hợp 30/70);
   `eval/cases.json`: thêm ca mơ hồ và ca "thay đổi thông báo cũ" có trường `existing` (việc có sẵn, eval tạo trước
   trong tài khoản tạm) và `expect.updates` (SC-005) — không sửa ca cũ; CLI in thêm.
-- [ ] T016 `app/static/app.js` + `app.css`: trace hiện nhãn tuyến + xác suất cho bước Decision; trang Cấu hình có 3 ô
+- [x] T016 `app/static/app.js` + `app.css`: trace hiện nhãn tuyến + xác suất cho bước Decision; trang Cấu hình có 3 ô
   ngưỡng (chỉ admin).
-- [ ] T017 `docs/ARCHITECTURE.md` (sơ đồ 4 tuyến), `docs/SECURITY.md` (dữ liệu gửi AI quyết định, hợp lệ hoá đầu ra),
+- [x] T017 `docs/ARCHITECTURE.md` (sơ đồ 4 tuyến), `docs/SECURITY.md` (dữ liệu gửi AI quyết định, hợp lệ hoá đầu ra),
   `AGENTS.md`.
-- [ ] T018 Soát bảo mật diff 004 (vai trò `security-reviewer`); sửa mức Cao/Trung bình.
-- [ ] T019 Chạy toàn bộ test/lint/eval; triển khai backend (Gemini vẫn tắt tới khi có khoá → luồng cũ); khi có khoá: eval
+- [x] T018 Soát bảo mật diff 004 (vai trò `security-reviewer`); sửa mức Cao/Trung bình.
+- [ ] T019 (đã: test/lint/eval, triển khai, số đo gốc trong quickstart; còn: eval khi có khoá) Chạy toàn bộ test/lint/eval; triển khai backend (Gemini vẫn tắt tới khi có khoá → luồng cũ); khi có khoá: eval
   so sánh có / không AI quyết định, ghi số vào quickstart.
 
 ## Dependencies

@@ -81,3 +81,19 @@
   .loginCard { width:100%; max-width:380px; display:flex; flex-direction:column; gap:4px }
   .loginCard h1 { margin:0; font-size:22px } .loginCard h2 { margin:14px 0 0 }
   .loginCard button { margin-top:10px } .loginCard .bad { min-height:1.2em; margin:6px 0 0; font-size:13px }
+
+/* 004: tuyến của AI quyết định trong trace + ô ngưỡng */
+.route { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef0f6; color: #2b2f3a; }
+.route.stop { background: #f3f4f7; color: #5b6070; }
+.route.direct { background: #dff5e9; color: #0e5a3e; }
+.route.review { background: #fff1cc; color: #6b4a00; }
+.route.fallback { background: #fde2e2; color: #8a1c1c; }
+.thresholds { display: flex; flex-wrap: wrap; gap: 12px; }
+.thresholds label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.thresholds input { width: 110px; }
+@media (prefers-color-scheme: dark) {
+  .route { background: #2a2f3d; color: #dfe3ee; }
+  .route.direct { background: #123d2c; color: #bdefd9; }
+  .route.review { background: #4a3a10; color: #ffe7a8; }
+  .route.fallback { background: #4a1d1d; color: #f8caca; }
+}

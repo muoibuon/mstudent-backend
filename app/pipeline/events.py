@@ -455,6 +455,47 @@ async def assess_fit(user_id: int, task: Task, msg: Message | None = None) -> di
     return {"fit_level": out.level, "fit_reason": out.reason, "fit_mode": "offline"}
 
 
+def event_field(text: str) -> str | None:
+    """Lĩnh vực đầu tiên mà nội dung sự kiện thuộc về (bảng FIELDS), để dựng câu mẫu."""
+    t = fold(text)
+    return next((f for f, (_, ek) in FIELDS.items() if any(_has(t, k) for k in ek)), None)
+
+
+def fit_template(level: str, major_name: str, event_text: str) -> str:
+    """Lý do dạng câu mẫu cho mức vừa / thấp (004 US4) — luôn nhắc tên ngành."""
+    name, field_ = major_name.strip()[:80], event_field(event_text)
+    if level == "low":
+        why = f": sự kiện thuộc lĩnh vực {field_}." if field_ else "."
+        return f"Ít liên quan ngành {name}{why}"[:200]
+    if level == "medium":
+        why = f"sự kiện thuộc lĩnh vực {field_}, " if field_ else ""
+        return f"Có ích chung cho ngành {name}: {why}mở rộng kỹ năng và hiểu biết ngoài chuyên môn."[:200]
+    why = f": sự kiện thuộc lĩnh vực {field_}." if field_ else "."
+    return f"Sát với chuyên môn ngành {name}{why}"[:200]
+
+
+async def fit_from_score(user_id: int, profile: dict, score_: float, text: str) -> dict:
+    """Mức do AI quyết định chấm. Mức cao: GPT viết lý do (giữ nguyên mức); vừa / thấp: câu mẫu, không gọi GPT."""
+    from . import decision
+
+    level = decision.fit_level(score_)
+    reason = None
+    if level == "high" and budget.llm_allowed(user_id):
+        from . import llm_agents
+
+        try:
+            reason = llm_agents.clean_text((await llm_agents.llm_major_fit(profile, text, user_id)).reason)[
+                :200
+            ]
+        except Exception as e:
+            log.warning("MajorFit LLM lỗi, dùng câu mẫu: %s", type(e).__name__)
+    return {
+        "fit_level": level,
+        "fit_reason": reason or fit_template(level, profile["major_name"], text),
+        "fit_mode": "llm",
+    }
+
+
 def _stored_message(user_id: int, task: Task) -> Message | None:
     row = repo.get_message(user_id, task.message_id)
     if not row:
@@ -466,9 +507,21 @@ def _stored_message(user_id: int, task: Task) -> Message | None:
 
 
 async def reassess_pending(user_id: int) -> None:
-    """Đổi ngành → tính lại mức phù hợp của các lời mời còn chờ."""
+    """Đổi ngành → tính lại mức phù hợp của các lời mời còn chờ (AI quyết định nếu bật, không thì như cũ)."""
+    from . import decision
+
+    profile = repo.get_profile(user_id)
     for task in repo.list_events(user_id, "pending")[:MAX_REASSESS]:
-        repo.update_task(user_id, task.id, await assess_fit(user_id, task, _stored_message(user_id, task)))
+        msg = _stored_message(user_id, task)
+        fields = None
+        if profile.get("major_name") and decision.enabled(user_id):
+            text = _event_text(task, msg)
+            try:
+                s = await decision.decide_fit(Message(source=task.source, body=text[:8000]), user_id, profile)
+                fields = await fit_from_score(user_id, profile, s, text)
+            except Exception as e:
+                log.warning("Tính lại hợp ngành bằng AI quyết định lỗi: %s", type(e).__name__)
+        repo.update_task(user_id, task.id, fields or await assess_fit(user_id, task, msg))
 
 
 # ---------------- Lời mời ----------------
@@ -522,8 +575,12 @@ def set_rsvp(user_id: int, task: Task, going: bool) -> Task:
     return repo.update_task(user_id, task.id, fields) or task
 
 
-async def enrich_event(user_id: int, task: Task, msg: Message) -> tuple[Task, str]:
-    """Việc `event` vừa tạo → gắn chi tiết, form, mức phù hợp, trạng thái lời mời. Trả về (việc, 'llm'|'rules')."""
+async def enrich_event(user_id: int, task: Task, msg: Message, dres=None) -> tuple[Task, str]:
+    """Việc `event` vừa tạo → gắn chi tiết, form, mức phù hợp, trạng thái lời mời. Trả về (việc, 'llm'|'rules').
+
+    `dres` (004): kết quả AI quyết định cho tin này — dùng "bắt buộc" khi đủ tin cậy và điểm hợp ngành khi có."""
+    from ..agent_config import thresholds
+
     det, kind = None, "rules"
     if budget.llm_allowed(user_id):
         from . import llm_agents
@@ -539,12 +596,15 @@ async def enrich_event(user_id: int, task: Task, msg: Message) -> tuple[Task, st
     event_url = safe_url(det.event_url) or base.event_url
     if event_url and not register and is_form_url(event_url):
         register, event_url = event_url, None
+    mandatory = det.mandatory
+    if dres is not None and dres.mandatory is not None and dres.mandatory_conf >= thresholds()["min_conf"]:
+        mandatory = dres.mandatory >= 0.5
     fields: dict = {
         "event_end": _iso(det.end_at),
         "event_url": event_url,
         "register_url": register,
         "register_deadline": _iso(det.register_deadline) or base.register_deadline,
-        "mandatory": 1 if det.mandatory else 0,
+        "mandatory": 1 if mandatory else 0,
         "form_meta": await fetch_form_meta(register),
         "rsvp": "pending",
     }
@@ -560,8 +620,12 @@ async def enrich_event(user_id: int, task: Task, msg: Message) -> tuple[Task, st
         fields["location"] = det.location.strip()[:200]
     if det.organizer and not task.note:
         fields["note"] = f"Tổ chức: {det.organizer.strip()[:150]}"
-    fields.update(await assess_fit(user_id, task, msg))
+    profile = repo.get_profile(user_id)
+    if dres is not None and dres.major_fit is not None and profile.get("major_name"):
+        fields.update(await fit_from_score(user_id, profile, dres.major_fit, _event_text(task, msg)))
+    else:
+        fields.update(await assess_fit(user_id, task, msg))
     task = repo.update_task(user_id, task.id, fields) or task
-    if det.mandatory:  # sự kiện bắt buộc tự vào lịch (không hỏi)
+    if mandatory:  # sự kiện bắt buộc tự vào lịch (không hỏi)
         task = set_rsvp(user_id, task, True)
     return task, kind

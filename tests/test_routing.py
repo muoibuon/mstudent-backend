@@ -60,7 +60,8 @@ def decisions(monkeypatch):
         state["headers"].append(dict(req.headers))
         if state["body"] is not None or state["status"] != 200:
             return httpx.Response(state["status"], json=state["body"] or {})
-        answers = {k: v for k, v in state["answers"].items() if k in payload["questions"]}
+        merged = {**state["answers"], **(state["fn"](payload) if state.get("fn") else {})}
+        answers = {k: v for k, v in merged.items() if k in payload["questions"]}
         return httpx.Response(200, json={"answers": answers, "usage": {"total_input_tokens": 400}})
 
     monkeypatch.setattr(decision, "_transport", httpx.MockTransport(handler))
@@ -77,6 +78,7 @@ def gpt(monkeypatch):
         "calls": [],
         "payloads": [],
         "triage": TriageOut(relevant=True, category=Category.exam, reason="GPT lọc"),
+        "tasks": None,  # danh sách TaskOut thay cho mặc định của Extractor
     }
 
     async def fake_run(agent, payload, **kwargs):
@@ -84,6 +86,20 @@ def gpt(monkeypatch):
         state["payloads"].append(payload if isinstance(payload, str) else "")
         if agent.name == "Triage":
             return _FakeResult(state["triage"])
+        if agent.name == "EventDetails":
+            from app.models import EventDetails
+
+            return _FakeResult(EventDetails(start_at=None, end_at=None, location=None, event_url=None,
+                                            register_url=None, register_deadline=None, organizer=None,
+                                            mandatory=False))  # fmt: skip
+        if agent.name == "MajorFit":
+            from app.models import MajorFitOut
+
+            return _FakeResult(
+                MajorFitOut(level="low", reason="GPT: rất hữu ích cho ngành Khoa học máy tính.")
+            )
+        if agent.name == "Extractor" and state["tasks"] is not None:
+            return _FakeResult(ExtractionOut(tasks=state["tasks"]))
         if agent.name == "Extractor":
             return _FakeResult(
                 ExtractionOut(
@@ -379,3 +395,237 @@ def test_selfcheck_reports_decision_route(client, user, decisions, gpt):
     decisions["status"], decisions["body"] = 500, {}
     r = client.post("/api/ai/check", headers=user[0]).json()
     assert r["decision"]["route"] == "fallback" and r["decision"]["ok"] is False
+
+
+# ---------------- Phase 3: cập nhật đúng việc cũ (T009) ----------------
+
+from app import repo  # noqa: E402
+
+LAB5 = {"title": "Nộp báo cáo Lab 5", "course": "INT3306", "category": "deadline",
+        "due_at": "2026-11-13T23:59:00+07:00", "priority": "high", "source": "email", "message_id": "m-lab5"}  # fmt: skip
+DELAY = {"body": "Thầy cho lùi deadline bài thực hành số 5 sang thứ 2 tuần sau nhé"}
+
+
+def _uid(client, h):
+    return client.get("/api/auth/me", headers=h).json()["id"]
+
+
+def _draft(title, course, due):
+    return TaskOut(
+        title=title, course=course, category=Category.deadline, due_at=due, location=None, action=None
+    )
+
+
+def test_decision_points_at_old_task_and_it_is_updated(client, user, decisions, gpt):
+    h = user[0]
+    old = repo.insert_task(_uid(client, h), LAB5)
+    gpt["tasks"] = [_draft("Nộp bài thực hành 5", None, "2026-11-16T23:59:00+07:00")]
+    decisions["answers"]["match_task"] = _choice(f"t{old.id}", 0.92)
+    out = _ingest(client, h, DELAY)
+    assert out["created"] == [] and [t["id"] for t in out["updated"]] == [old.id]
+    assert (
+        out["updated"][0]["due_at"] == "2026-11-16T23:59:00+07:00"
+        and out["updated"][0]["course"] == "INT3306"
+    )
+    crit = decisions["requests"][0]["questions"]["match_task"]["criteria"]
+    assert crit[f"t{old.id}"] == "Nộp báo cáo Lab 5 · INT3306 · 13/11 23:59" and "none" in crit
+    assert _step(out, "Decision")["output"]["match_task"] == f"t{old.id}"
+
+
+def test_without_hint_the_same_notice_creates_a_new_task(client, user, decisions, gpt):
+    h = user[0]
+    repo.insert_task(_uid(client, h), LAB5)
+    gpt["tasks"] = [_draft("Nộp bài thực hành 5", None, "2026-11-16T23:59:00+07:00")]
+    decisions["answers"]["match_task"] = _choice("none", 0.9)
+    out = _ingest(client, h, DELAY)
+    assert len(out["created"]) == 1 and out["updated"] == []  # so khớp chuỗi một mình không nhận ra
+
+
+def test_low_confidence_hint_is_ignored(client, user, decisions, gpt):
+    h = user[0]
+    old = repo.insert_task(_uid(client, h), LAB5)
+    gpt["tasks"] = [_draft("Nộp bài thực hành 5", None, "2026-11-16T23:59:00+07:00")]
+    decisions["answers"]["match_task"] = _choice(f"t{old.id}", 0.5)
+    assert len(_ingest(client, h, DELAY)["created"]) == 1
+
+
+def test_other_users_task_id_is_never_used(client, user, decisions, gpt):
+    from .conftest import auth, signup
+
+    other = auth(signup(client, "b@vju.ac.vn"))
+    theirs = repo.insert_task(_uid(client, other), LAB5)
+    h = user[0]
+    mine = repo.insert_task(_uid(client, h), {**LAB5, "title": "Đọc chương 3", "course": "MAT1093"})
+    gpt["tasks"] = [_draft("Nộp bài thực hành 5", None, "2026-11-16T23:59:00+07:00")]
+    decisions["answers"]["match_task"] = _choice(f"t{theirs.id}", 0.99)
+    out = _ingest(client, h, DELAY)
+    assert len(out["created"]) == 1 and out["updated"] == []
+    crit = decisions["requests"][0]["questions"]["match_task"]["criteria"]
+    assert set(crit) == {f"t{mine.id}", "none"}  # chỉ việc của chính người dùng được gửi đi
+    assert repo.get_task(_uid(client, other), theirs.id).due_at == LAB5["due_at"]
+
+
+def test_hint_never_merges_different_courses(client, user, decisions, gpt):
+    h = user[0]
+    old = repo.insert_task(_uid(client, h), LAB5)
+    gpt["tasks"] = [_draft("Nộp bài tập 5", "MAT1093", "2026-11-16T23:59:00+07:00")]
+    decisions["answers"]["match_task"] = _choice(f"t{old.id}", 0.95)
+    out = _ingest(client, h, {"body": "MAT1093: nộp bài tập 5 trước thứ 2"})
+    assert len(out["created"]) == 1 and repo.get_task(_uid(client, h), old.id).due_at == LAB5["due_at"]
+
+
+def test_hint_ignored_when_notice_has_several_tasks(client, user, decisions, gpt):
+    h = user[0]
+    old = repo.insert_task(_uid(client, h), LAB5)
+    gpt["tasks"] = [_draft("Nộp bài thực hành 5", None, "2026-11-16T23:59:00+07:00"),
+                    _draft("Ôn tập giữa kỳ", None, "2026-11-20T09:00:00+07:00")]  # fmt: skip
+    decisions["answers"]["match_task"] = _choice(f"t{old.id}", 0.95)
+    out = _ingest(client, h, {"body": "Lùi bài thực hành 5 sang thứ 2; thứ 6 tuần sau kiểm tra giữa kỳ"})
+    assert repo.get_task(_uid(client, h), old.id).due_at == LAB5["due_at"] and len(out["created"]) == 2
+
+
+def test_candidates_capped_same_course_first_no_declined(client, user):
+    from app.pipeline import decision as d
+
+    h = user[0]
+    uid = _uid(client, h)
+    for i in range(35):
+        repo.insert_task(
+            uid,
+            {
+                **LAB5,
+                "title": f"Việc {i}",
+                "course": "MAT1093",
+                "due_at": f"2026-12-{i % 28 + 1:02d}T09:00:00+07:00",
+            },
+        )
+    same = repo.insert_task(uid, {**LAB5, "due_at": "2027-06-01T09:00:00+07:00"})
+    declined = repo.insert_task(uid, {**LAB5, "title": "Seminar"})
+    repo.update_task(uid, declined.id, {"rsvp": "declined"})
+    done = repo.insert_task(uid, {**LAB5, "title": "Đã xong"})
+    repo.set_status(uid, done.id, "done")
+    cands = d.candidates(uid, Message(body="INT3306: lùi hạn Lab 5"))
+    ids = [t.id for t in cands]
+    assert len(cands) == d.MAX_CANDIDATES and ids[0] == same.id  # cùng môn lên đầu dù hạn xa
+    assert declined.id not in ids and done.id not in ids
+    assert len(d.match_question(cands)["match_task"]["criteria"]) == d.MAX_CANDIDATES + 1
+    assert d.match_question([]) == {}
+
+
+# ---------------- Phase 4: sự kiện trong cùng lượt (T011) ----------------
+
+IT = {"school_name": "Trường ĐH Việt Nhật", "school_abbr": "VNU-VJU", "degree_level": "dai_hoc",
+      "major_code": "7480101", "major_name": "Khoa học máy tính", "student_id": "21020001", "phone": "0912345678"}  # fmt: skip
+JP = {**IT, "major_code": "7310613", "major_name": "Nhật Bản học"}
+SEMINAR = {"body": "Seminar về AI và lập trình lúc 14h00 ngày 20/11/2026 tại phòng 501, mời các bạn tham dự."}
+
+
+def _event_setup(decisions, gpt, fit=1.8, mandatory=0.05):
+    decisions["answers"].update(category=_choice("event"), major_fit=_score(fit), mandatory=_noul(mandatory))
+    gpt["tasks"] = [TaskOut(title="Seminar AI và lập trình", course=None, category=Category.event,
+                            due_at="2026-11-20T14:00:00+07:00", location="Phòng 501", action="Tham dự")]  # fmt: skip
+
+
+def test_event_questions_only_sent_after_major_declared(client, user, decisions, gpt):
+    h = user[0]
+    _event_setup(decisions, gpt)
+    _ingest(client, h, SEMINAR)
+    assert not {"mandatory", "major_fit"} & set(decisions["requests"][0]["questions"])
+    client.put("/api/profile", json=IT, headers=h)
+    _ingest(client, h, {"body": "Workshop kỹ năng viết CV ngày 25/11/2026 lúc 15h00."})
+    q = decisions["requests"][-1]["questions"]
+    assert (
+        "Khoa học máy tính" in q["major_fit"]["instructions"]
+        and "Việt Nhật" in q["major_fit"]["instructions"]
+    )
+    sent = json.dumps(decisions["requests"][-1], ensure_ascii=False)
+    assert "21020001" not in sent and "0912345678" not in sent
+
+
+def test_high_fit_reason_written_by_gpt_level_from_decision(client, user, decisions, gpt):
+    h = user[0]
+    client.put("/api/profile", json=IT, headers=h)
+    _event_setup(decisions, gpt, fit=1.8)
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert (
+        t["rsvp"] == "pending" and t["fit_level"] == "high" and t["fit_mode"] == "llm"
+    )  # mức của AI quyết định
+    assert t["fit_reason"] == "GPT: rất hữu ích cho ngành Khoa học máy tính."
+    assert gpt["calls"] == ["Extractor", "EventDetails", "MajorFit"]
+
+
+@pytest.mark.parametrize(
+    "fit,level,start", [(0.2, "low", "Ít liên quan ngành"), (1.0, "medium", "Có ích chung cho ngành")]
+)
+def test_medium_low_fit_use_template_without_gpt(client, user, decisions, gpt, fit, level, start):
+    h = user[0]
+    client.put("/api/profile", json=JP, headers=h)
+    _event_setup(decisions, gpt, fit=fit)
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert t["fit_level"] == level and t["fit_mode"] == "llm"
+    assert t["fit_reason"].startswith(start) and "Nhật Bản học" in t["fit_reason"]
+    assert "MajorFit" not in gpt["calls"]
+
+
+def test_mandatory_from_decision_goes_to_calendar(client, user, decisions, gpt):
+    h = user[0]
+    client.put("/api/profile", json=IT, headers=h)
+    _event_setup(decisions, gpt, mandatory=0.96)
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert t["mandatory"] is True and t["rsvp"] == "going"
+
+
+def test_unsure_mandatory_falls_back_to_event_details(client, user, decisions, gpt):
+    h = user[0]
+    client.put("/api/profile", json=IT, headers=h)
+    _event_setup(decisions, gpt)
+    decisions["answers"]["mandatory"] = _noul(0.6, 0.6)
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert t["mandatory"] is False and t["rsvp"] == "pending"  # EventDetails giả nói không bắt buộc
+
+
+def test_same_event_different_majors_and_reassess_on_major_change(client, user, decisions, gpt):
+    def by_major(payload):
+        q = payload["questions"].get("major_fit")
+        return {"major_fit": _score(0.2 if q and "Nhật Bản học" in q["instructions"] else 1.8)} if q else {}
+
+    decisions["fn"] = by_major
+    h = user[0]
+    client.put("/api/profile", json=IT, headers=h)
+    _event_setup(decisions, gpt)
+    decisions["answers"].pop("major_fit")
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert t["fit_level"] == "high"
+    n = len(decisions["requests"])
+    client.put("/api/profile", json=JP, headers=h)  # đổi ngành → tính lại nền
+    assert set(decisions["requests"][n]["questions"]) == {"major_fit"}  # lượt chỉ có câu hợp ngành
+    (e,) = client.get("/api/events?state=pending", headers=h).json()
+    assert e["fit_level"] == "low" and "Nhật Bản học" in e["fit_reason"] and e["fit_mode"] == "llm"
+
+
+def test_decision_off_events_work_as_before(client, user, decisions, gpt, monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY")
+    h = user[0]
+    client.put("/api/profile", json=IT, headers=h)
+    _event_setup(decisions, gpt)
+    (t,) = _ingest(client, h, SEMINAR)["created"]
+    assert t["rsvp"] == "pending" and t["fit_mode"] == "llm" and "MajorFit" in gpt["calls"]
+    assert decisions["requests"] == []
+
+
+# ---------------- Phase 6: eval qua hàm điều phối (T015) ----------------
+
+
+def test_eval_reports_routes_calls_and_cleans_temp_users(client, decisions, gpt):
+    import sqlite3
+
+    from app import evaluation
+
+    r = asyncio.run(evaluation.evaluate(use_llm=True))
+    assert r["decision"] is True and r["routes"].get("direct", 0) >= 1
+    assert r["decision_calls"] == len(r["cases"]) and r["gpt_calls"] >= 1 and r["p50_ms"] is not None
+    assert r["gpt_per_noise"] is not None and r["gpt_per_msg_mix30"] is not None
+    assert all("route" in c for c in r["cases"])
+    db = sqlite3.connect(config.DB_PATH)
+    assert db.execute("SELECT count(*) FROM users WHERE email LIKE 'eval-%'").fetchone()[0] == 0
+    assert db.execute("SELECT count(*) FROM tasks").fetchone()[0] == 0  # tài khoản tạm xoá kèm việc
