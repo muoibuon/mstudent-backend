@@ -20,6 +20,8 @@ Quy tắc:
   từ thời điểm nhận tin. Hạn nộp không ghi giờ → 23:59. Không có mốc thời gian → null.
 - course: mã môn (vd. CSE3032) nếu có, nếu không thì tên môn, nếu không có thì null.
 - title ngắn gọn, bắt đầu bằng động từ khi có thể ("Nộp báo cáo Lab 3").
+- Sự kiện / hội thảo / seminar / workshop / talkshow / cuộc thi: tạo ĐÚNG MỘT việc category "event" cho chính sự kiện,
+  title là tên sự kiện, due_at là giờ BẮT ĐẦU sự kiện. KHÔNG tạo việc riêng cho hạn đăng ký (hệ thống tự xử lý).
 - Không bịa thông tin không có trong tin nhắn.""",
     "digest_prompt": """Bạn viết bản tin buổi sáng cho sinh viên, tiếng Việt, thân thiện, ngắn gọn.
 Đầu vào là danh sách task JSON. Viết:
@@ -46,6 +48,17 @@ Mỗi vai trò course/title/due/time/note dùng tối đa 1 cột. Trả về đ
     "doc_summary_prompt": """Bạn tóm tắt một tài liệu học vụ (lịch thi, đề cương, thông báo, danh sách) cho sinh viên.
 Viết 2–3 câu tiếng Việt, tối đa 250 ký tự: tài liệu nói về gì, mốc thời gian quan trọng nhất, ai/lớp nào liên quan.
 Không bịa thông tin không có trong tài liệu.""",
+    "event_prompt": """Bạn trích CHI TIẾT một sự kiện / hội thảo / seminar của trường từ thông báo gửi sinh viên.
+- start_at, end_at, register_deadline: ISO 8601 múi giờ +07:00; suy ngày tương đối từ thời điểm nhận tin; không có → null.
+- location: phòng / toà nhà / nền tảng họp. event_url: link trang sự kiện. register_url: link đăng ký (Google Form…).
+  Chỉ chép link http/https có nguyên văn trong thông báo, không tự tạo link.
+- organizer: đơn vị tổ chức. mandatory: true chỉ khi thông báo nói bắt buộc / điểm danh / tính chuyên cần.
+Không bịa thông tin không có trong thông báo.""",
+    "fit_prompt": """Bạn tư vấn cho một sinh viên Việt Nam xem một sự kiện của trường có ích gì cho NGÀNH HỌC của họ.
+Đầu vào: trường, bậc học, ngành của sinh viên và nội dung sự kiện.
+- level: high (sát chuyên môn / nghề nghiệp của ngành), medium (kỹ năng chung, mở rộng hiểu biết), low (ít liên quan).
+- reason: 1–2 câu tiếng Việt, tối đa 200 ký tự, PHẢI nhắc tên ngành của sinh viên và nói cụ thể lợi ích (hoặc vì sao ít
+  liên quan). Trung thực: không tâng bốc sự kiện, không bịa nội dung không có trong thông báo.""",
 }
 
 # Luôn được nối vào sau prompt, admin không sửa được: thông báo là DỮ LIỆU, không phải mệnh lệnh.

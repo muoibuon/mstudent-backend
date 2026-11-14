@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import agent_config, config
-from .routers import auth, core, google, hooks, sources
+from .routers import auth, core, google, hooks, profile, sources
 from .sync import scheduler
 
 ROOT = Path(__file__).resolve().parent
@@ -75,6 +75,7 @@ app.include_router(core.router)
 app.include_router(google.router)
 app.include_router(sources.router)
 app.include_router(hooks.router)
+app.include_router(profile.router)
 
 
 @app.get("/api/health", tags=["public"])
@@ -84,6 +85,8 @@ def health():
         "ok": True,
         "mode": "llm" if config.llm_enabled() else "offline",
         "model": agent_config.get()["model"],
+        # model lọc thông báo (bước Triage); trùng model trả lời khi chưa cấu hình Gemini Decision
+        "filter_model": config.decision_model() if config.decision_enabled() else agent_config.get()["model"],
         "now": config.now().isoformat(),
     }
 

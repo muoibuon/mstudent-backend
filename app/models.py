@@ -85,6 +85,17 @@ class Task(BaseModel):
     updated_from: list[str] = []
     sources: list[str] = []
     note: str | None = None
+    # 003: lời mời sự kiện (rsvp None = việc thường)
+    rsvp: Literal["pending", "going", "declined"] | None = None
+    event_end: str | None = None
+    event_url: str | None = None
+    register_url: str | None = None
+    register_deadline: str | None = None
+    mandatory: bool = False
+    fit_level: Literal["high", "medium", "low"] | None = None
+    fit_reason: str | None = None
+    fit_mode: str | None = None
+    form_meta: dict | None = None
 
 
 class TaskPatch(BaseModel):
@@ -243,3 +254,48 @@ class PushRegister(BaseModel):
     token: str = Field(max_length=200, pattern=r"^Expo(nent)?PushToken\[[A-Za-z0-9_\-]{1,180}\]$")
     platform: Literal["android", "ios"]
     notify: bool = True
+
+
+# ---------------- 003: hồ sơ học tập + lời mời sự kiện ----------------
+
+DegreeLevel = Literal["dai_hoc", "thac_si", "tien_si"]
+
+
+class ProfileUpdate(BaseModel):
+    school_name: str = Field(max_length=200)
+    school_abbr: str = Field("", max_length=40)
+    degree_level: DegreeLevel
+    major_code: str = Field("", max_length=20)
+    major_name: str = Field(min_length=1, max_length=200)
+    student_id: str = Field("", max_length=40)
+    class_name: str = Field("", max_length=60)
+    phone: str = Field("", max_length=20, pattern=r"^[0-9+ .()-]*$")
+
+
+class Profile(ProfileUpdate):
+    school_name: str = ""
+    degree_level: DegreeLevel | Literal[""] = ""
+    major_name: str = ""
+    needs_profile: bool = True
+
+
+class RsvpRequest(BaseModel):
+    going: bool
+
+
+class EventDetails(BaseModel):
+    """Chi tiết sự kiện trích từ thông báo (agent EventDetails). Mọi trường bắt buộc (null nếu không có)."""
+
+    start_at: str | None = Field(description="Giờ bắt đầu ISO 8601 +07:00, null nếu không có")
+    end_at: str | None = Field(description="Giờ kết thúc ISO 8601 +07:00, null nếu không có")
+    location: str | None = Field(description="Địa điểm / phòng / link họp, null nếu không có")
+    event_url: str | None = Field(description="Link trang sự kiện (http/https), null nếu không có")
+    register_url: str | None = Field(description="Link đăng ký (vd. Google Form), null nếu không có")
+    register_deadline: str | None = Field(description="Hạn đăng ký ISO 8601 +07:00, null nếu không có")
+    organizer: str | None = Field(description="Đơn vị tổ chức, null nếu không có")
+    mandatory: bool = Field(description="true nếu thông báo nói bắt buộc / điểm danh / tính chuyên cần")
+
+
+class MajorFitOut(BaseModel):
+    level: Literal["high", "medium", "low"]
+    reason: str = Field(description="1–2 câu tiếng Việt, ≤ 200 ký tự, nhắc tên ngành của sinh viên")

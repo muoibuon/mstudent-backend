@@ -153,6 +153,33 @@ def _init(conn: sqlite3.Connection) -> None:
     # Cột thêm sau (CSDL production đã có dữ liệu → chỉ ALTER khi thiếu, không tạo lại bảng).
     _ensure_column(conn, "tasks", "sources", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "tasks", "note", "TEXT")
+    # 003-event-rsvp: hồ sơ học tập + lời mời sự kiện
+    for col in (
+        "school_name",
+        "school_abbr",
+        "degree_level",
+        "major_code",
+        "major_name",
+        "student_id",
+        "class_name",
+        "phone",
+    ):
+        _ensure_column(conn, "users", col, "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(conn, "users", "profile_snooze_until", "TEXT")
+    for col in (
+        "rsvp",
+        "event_end",
+        "event_url",
+        "register_url",
+        "register_deadline",
+        "fit_level",
+        "fit_reason",
+        "fit_mode",
+        "form_meta",
+    ):
+        _ensure_column(conn, "tasks", col, "TEXT")
+    _ensure_column(conn, "tasks", "mandatory", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "tasks", "reg_task_id", "INTEGER")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
 

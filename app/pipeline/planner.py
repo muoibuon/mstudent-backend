@@ -133,7 +133,9 @@ def plan(
     """Trả về (task mới, task được cập nhật). Gộp với việc đã có (kể cả từ nguồn khác) theo FR-009."""
     created, updated = [], []
     # Việc đã xong vẫn dùng để so khớp: khớp → bỏ qua (không mở lại, không tạo trùng — FR-074).
-    existing = [t for t in repo.list_tasks(user_id, None) if t.status in ("open", "done")]
+    existing = [
+        t for t in repo.list_tasks(user_id, None, include_invites=True) if t.status in ("open", "done")
+    ]
     for d in sanitize(drafts):
         match = match_existing(existing, d)
         fields = {

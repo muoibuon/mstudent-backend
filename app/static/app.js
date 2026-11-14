@@ -247,7 +247,8 @@ $('statsRefresh').onclick = loadStats;
 async function loadHealth() {
   const s = await (await fetch('/api/health')).json();
   NOW = new Date(s.now);
-  const label = s.mode === 'llm' ? '🟢 LLM · ' + s.model : '🟡 Offline (luật)';
+  const filter = s.filter_model && s.filter_model !== s.model ? 'lọc: ' + s.filter_model + ' · trả lời: ' : '';
+  const label = s.mode === 'llm' ? '🟢 LLM · ' + filter + s.model : '🟡 Offline (luật)';
   $('modePill').textContent = label; $('modePillLogin').textContent = label;
   $('nowPill').textContent = '🕒 ' + fmtDT(s.now);
 }

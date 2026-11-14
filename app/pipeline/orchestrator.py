@@ -94,6 +94,10 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
     repo.save_message(user_id, msg, tri.relevant, tri.category, tri.reason[:300])
     created: list[Task] = []
     updated: list[Task] = []
+    # 003: tin được phân loại là sự kiện nhưng Extractor chỉ trả việc "đăng ký …" (deadline) → vẫn phải thành lời mời.
+    is_event = tri.relevant and tri.category == Category.event and ext and ext.tasks
+    if is_event and not any(d.category == Category.event for d in ext.tasks):
+        ext.tasks[0] = ext.tasks[0].model_copy(update={"category": Category.event})
     if tri.relevant and ext and ext.tasks:
         t0 = time.perf_counter()
         try:
@@ -114,6 +118,28 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
                 "updated": [{"id": t.id, "title": t.title, "due_at": t.due_at} for t in updated],
             },
         )
+    # 003: việc sự kiện mới → lời mời Tham gia / Không (chi tiết, form đăng ký, mức phù hợp với ngành).
+    for i, t in enumerate(created):
+        if t.category == Category.event and t.rsvp is None:
+            from . import events
+
+            t0 = time.perf_counter()
+            try:
+                created[i], kind = await events.enrich_event(user_id, t, msg)
+                tr.add(
+                    "EventDetails",
+                    kind,
+                    t0,
+                    {
+                        "id": t.id,
+                        "rsvp": created[i].rsvp,
+                        "fit": created[i].fit_level,
+                        "fit_mode": created[i].fit_mode,
+                    },
+                )
+            except Exception as e:  # lỗi làm giàu không được làm mất việc
+                log.warning("Không gắn được chi tiết sự kiện: %s", type(e).__name__)
+                tr.add("EventDetails", "python", t0, error=_short_error(e))
     summary = (msg.subject or msg.body).strip().replace("\n", " ")[:90]
     repo.save_trace(user_id, msg.id, mode, f"[{msg.source.value}] {summary}", tr.steps)
     return IngestResult(
@@ -204,6 +230,7 @@ async def ai_selfcheck(user_id: int | None = None) -> dict:
         "ok": bool(tri.relevant),
         "mode": "llm",
         "model": model,
+        "filter_model": config.decision_model() if config.decision_enabled() else model,
         "latency_ms": round((time.perf_counter() - t0) * 1000),
         "sample": tri.model_dump(mode="json"),
     }

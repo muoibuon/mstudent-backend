@@ -235,3 +235,43 @@ def test_push_tokens_are_owned_per_user(client):
     )  # máy đổi tài khoản → chuyển chủ
     owner = db.execute("SELECT u.email FROM push_tokens p JOIN users u ON u.id=p.user_id").fetchone()[0]
     assert owner == "b@x.vn"
+
+
+# ---------------- 003: danh mục trường/ngành + hồ sơ ----------------
+
+
+def test_catalog_requires_login_and_supports_etag(client, user):
+    assert client.get("/api/catalog").status_code == 401
+    r = client.get("/api/catalog", headers=user[0])
+    assert r.status_code == 200 and r.headers.get("etag")
+    data = r.json()
+    abbrs = {s["abbr"] for s in data["schools"]}
+    assert {"HUST", "VNU-VJU", "NEU"} <= abbrs and len(data["schools"]) > 250
+    assert set(data["majors"]) == {"dai_hoc", "thac_si", "tien_si"}
+    assert any(m["name"] == "Khoa học máy tính" for m in data["majors"]["dai_hoc"])
+    assert (
+        data["programs"]["VNU-VJU"]["dai_hoc"] and "Thông tư 09/2022" in data["sources"]["majors"]["source"]
+    )
+    again = client.get("/api/catalog", headers={**user[0], "If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304
+
+
+def test_profile_is_per_user_and_validated(client):
+    a, b = auth(signup(client, "a@x.vn")), auth(signup(client, "b@x.vn"))
+    assert client.get("/api/profile").status_code == 401
+    assert client.get("/api/profile", headers=a).json()["needs_profile"] is True
+    body = {"school_name": "Trường Đại học Việt Nhật, ĐHQGHN", "school_abbr": "VNU-VJU", "degree_level": "dai_hoc",
+            "major_code": "BCSE", "major_name": "Khoa học và Kỹ thuật máy tính", "student_id": "21020001", "class_name": "K5"}  # fmt: skip
+    r = client.put("/api/profile", json=body, headers=a)
+    assert (
+        r.status_code == 200
+        and r.json()["needs_profile"] is False
+        and r.json()["major_name"].startswith("Khoa học")
+    )
+    assert client.get("/api/profile", headers=b).json()["major_name"] == ""  # B không thấy hồ sơ của A
+    assert client.put("/api/profile", json={**body, "degree_level": "lop_12"}, headers=a).status_code == 422
+    assert client.put("/api/profile", json={**body, "major_name": "x" * 201}, headers=a).status_code == 422
+    assert client.put("/api/profile", json={**body, "phone": "<script>"}, headers=a).status_code == 422
+    assert client.post("/api/profile/snooze", headers=b).status_code == 200
+    assert client.get("/api/profile", headers=b).json()["needs_profile"] is False  # "Để sau" 7 ngày
+    assert client.get("/api/auth/me", headers=a).status_code == 200

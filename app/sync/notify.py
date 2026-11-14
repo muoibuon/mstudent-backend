@@ -21,6 +21,8 @@ log = logging.getLogger("mstudent")
 EXPO_URL = "https://exp.host/--/api/v2/push/send"
 _transport: httpx.AsyncBaseTransport | None = None  # test gán MockTransport
 WEEKDAY = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+FIT_LABEL = {"high": "Rất hợp ngành", "medium": "Có ích", "low": "Ít liên quan"}
+MAX_INVITES = 3
 SOURCE_NAME = {"gmail": "Gmail", "classroom": "Classroom", "ics": "lịch LMS", "sheet": "bảng lớp"}
 
 
@@ -48,24 +50,48 @@ def build_message(conn: dict, created: list[Task], updated: list[Task]) -> tuple
 async def after_run(conn: dict, res: RunResult, first_run: bool) -> None:
     if first_run:
         return  # kết quả lượt đầu đã hiện trong app (FR-071)
-    created = [t for t in res.created if t and t.status == "open"]
-    updated = [t for t in res.updated if t and t.status == "open" and t.id not in {c.id for c in created}]
+    invites = [t for t in res.created if t and t.status == "open" and t.rsvp == "pending"]
+    created = [t for t in res.created if t and t.status == "open" and t.rsvp != "pending"]
+    updated = [
+        t
+        for t in res.updated
+        if t and t.status == "open" and t.rsvp in (None, "going") and t.id not in {c.id for c in created}
+    ]
     msg = build_message(conn, created, updated)
     tokens = repo.push_tokens_for(conn["user_id"])  # chỉ token đang bật nhắc việc (FR-042)
-    if not msg or not tokens:
+    if not tokens or not (msg or invites):
         return
-    title, body, ids = msg
-    payload = [
-        {
-            "to": tok,
-            "title": title,
-            "body": body,
-            "data": {"type": "tasks", "task_ids": ids[:20]},
-            "channelId": "default",
-            "sound": "default",
-        }
-        for tok in tokens
-    ]
+    payload = []
+    if msg:
+        title, body, ids = msg
+        payload += [
+            {
+                "to": tok,
+                "title": title,
+                "body": body,
+                "data": {"type": "tasks", "task_ids": ids[:20]},
+                "channelId": "default",
+                "sound": "default",
+            }
+            for tok in tokens
+        ]
+    # Lời mời sự kiện: mỗi lời mời một thông báo có nút Tham gia / Không (tối đa 3 mỗi lượt).
+    for t in invites[:MAX_INVITES]:
+        fit = FIT_LABEL.get(t.fit_level or "", "")
+        when = fmt_due(t.due_at).replace("hạn ", "") if t.due_at else "chưa rõ giờ"
+        payload += [
+            {
+                "to": tok,
+                "title": f"Sự kiện mới: {t.title}"[:120],
+                "body": " · ".join(x for x in (fit, when, "Tham gia không?") if x),
+                "data": {"type": "invite", "task_id": t.id},
+                "categoryId": "event_invite",
+                "channelId": "default",
+                "sound": "default",
+            }
+            for tok in tokens
+        ]
+    sent_to = [p["to"] for p in payload]
     try:
         async with httpx.AsyncClient(timeout=5, transport=_transport) as c:
             r = await c.post(EXPO_URL, json=payload, headers={"Accept": "application/json"})
@@ -73,7 +99,7 @@ async def after_run(conn: dict, res: RunResult, first_run: bool) -> None:
     except (httpx.HTTPError, ValueError) as e:
         log.warning("Không gửi được thông báo đẩy: %s", type(e).__name__)
         return
-    for tok, ticket in zip(tokens, tickets, strict=False):
+    for tok, ticket in zip(sent_to, tickets, strict=False):
         if (
             ticket.get("status") == "error"
             and (ticket.get("details") or {}).get("error") == "DeviceNotRegistered"

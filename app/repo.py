@@ -220,6 +220,16 @@ def _row_to_task(r: sqlite3.Row) -> Task:
         updated_from=json.loads(r["updated_from"] or "[]"),
         sources=json.loads(r["sources"] or "[]"),  # cột luôn có (db._ensure_column)
         note=r["note"],
+        rsvp=r["rsvp"],
+        event_end=r["event_end"],
+        event_url=r["event_url"],
+        register_url=r["register_url"],
+        register_deadline=r["register_deadline"],
+        mandatory=bool(r["mandatory"]),
+        fit_level=r["fit_level"],
+        fit_reason=r["fit_reason"],
+        fit_mode=r["fit_mode"],
+        form_meta=json.loads(r["form_meta"]) if r["form_meta"] else None,
     )
 
 
@@ -251,11 +261,15 @@ def insert_task(user_id: int, t: dict) -> Task:
 TASK_FIELDS = {
     "title", "course", "category", "due_at", "location", "action", "priority", "status",
     "reminders", "updated_from", "done_at", "sources", "note",
+    "rsvp", "event_end", "event_url", "register_url", "register_deadline", "mandatory",
+    "fit_level", "fit_reason", "fit_mode", "form_meta", "reg_task_id",
 }  # fmt: skip
 
 
 def update_task(user_id: int, task_id: int, fields: dict) -> Task | None:
     fields = {k: v for k, v in fields.items() if k in TASK_FIELDS}
+    if "form_meta" in fields and fields["form_meta"] is not None:
+        fields["form_meta"] = json.dumps(fields["form_meta"])
     for k in ("reminders", "updated_from", "sources"):
         if k in fields:
             fields[k] = json.dumps(fields[k])
@@ -275,8 +289,11 @@ def get_task(user_id: int, task_id: int) -> Task | None:
         return _row_to_task(r) if r else None
 
 
-def list_tasks(user_id: int, status: str | None = "open") -> list[Task]:
+def list_tasks(user_id: int, status: str | None = "open", include_invites: bool = False) -> list[Task]:
+    """Việc của người dùng. Mặc định bỏ lời mời sự kiện chưa trả lời / đã từ chối (003); planner cần cả hai để gộp."""
     q, args = "SELECT * FROM tasks WHERE user_id=?", [user_id]
+    if not include_invites:
+        q += " AND (rsvp IS NULL OR rsvp='going')"
     if status:
         q += " AND status=?"
         args.append(status)
@@ -681,3 +698,63 @@ def push_tokens_for(user_id: int) -> list[str]:
     with connect() as c:
         rows = c.execute("SELECT token FROM push_tokens WHERE user_id=? AND notify=1", (user_id,)).fetchall()
         return [r[0] for r in rows]
+
+
+# ---------------- 003: hồ sơ học tập + lời mời sự kiện ----------------
+
+PROFILE_FIELDS = (
+    "school_name",
+    "school_abbr",
+    "degree_level",
+    "major_code",
+    "major_name",
+    "student_id",
+    "class_name",
+    "phone",
+)
+
+
+def get_profile(user_id: int) -> dict:
+    with connect() as c:
+        r = c.execute(
+            f"SELECT {', '.join(PROFILE_FIELDS)}, profile_snooze_until FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+    d = dict(r) if r else dict.fromkeys(PROFILE_FIELDS, "")
+    snooze = d.pop("profile_snooze_until", None)
+    complete = bool(d.get("school_name") and d.get("major_name") and d.get("degree_level"))
+    d["needs_profile"] = not complete and not (snooze and snooze > _iso())
+    return d
+
+
+def save_profile(user_id: int, fields: dict) -> dict:
+    vals = {k: (fields.get(k) or "").strip() for k in PROFILE_FIELDS}
+    with connect() as c:
+        c.execute(
+            f"UPDATE users SET {', '.join(f'{k}=?' for k in PROFILE_FIELDS)} WHERE id=?",  # tên cột là hằng số
+            (*vals.values(), user_id),
+        )
+    return get_profile(user_id)
+
+
+def snooze_profile(user_id: int, days: int = 7) -> None:
+    with connect() as c:
+        c.execute(
+            "UPDATE users SET profile_snooze_until=? WHERE id=?",
+            ((config.utcnow() + timedelta(days=days)).isoformat(), user_id),
+        )
+
+
+def list_events(user_id: int, state: str) -> list[Task]:
+    assert state in ("pending", "going", "declined")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT * FROM tasks WHERE user_id=? AND rsvp=? AND status='open' ORDER BY due_at IS NULL, due_at",
+            (user_id, state),
+        ).fetchall()
+    return [_row_to_task(r) for r in rows]
+
+
+def task_reg_id(user_id: int, task_id: int) -> int | None:
+    with connect() as c:
+        r = c.execute("SELECT reg_task_id FROM tasks WHERE id=? AND user_id=?", (task_id, user_id)).fetchone()
+    return r[0] if r else None

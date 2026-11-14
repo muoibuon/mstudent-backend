@@ -42,10 +42,11 @@ việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào vi�
 
 <h2>3. Dữ liệu được gửi tới đâu</h2>
 <ul>
-  <li><strong>Nhà cung cấp mô hình AI (OpenAI):</strong> nội dung thông báo và câu hỏi của bạn được gửi tới
-      OpenAI qua API để phân tích. Khi AI không khả dụng, ứng dụng xử lý bằng bộ luật ngay trên máy chủ và ghi
-      rõ là "offline".</li>
-  <li><strong>Google:</strong> chỉ để đăng nhập và đọc Gmail theo quyền bạn cấp.</li>
+  <li><strong>Nhà cung cấp mô hình AI (Google Gemini và OpenAI):</strong> nội dung thông báo được gửi tới Google
+      (Gemini Decision) qua API để lọc tin đáng chú ý; tin được giữ lại và câu hỏi của bạn được gửi tới OpenAI qua API
+      để trích việc và trả lời. Khi AI không khả dụng, ứng dụng xử lý bằng bộ luật ngay trên máy chủ và ghi rõ là
+      "offline".</li>
+  <li><strong>Google (tài khoản):</strong> để đăng nhập và đọc Gmail, Classroom theo quyền bạn cấp.</li>
   <li>Ngoài hai bên trên, dữ liệu không được chia sẻ cho bên thứ ba nào.</li>
 </ul>
 
