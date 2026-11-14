@@ -11,8 +11,8 @@ Chép `.env.example` cho local hoặc `deploy/mstudent.env.example` cho dịch v
 ```dotenv
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-6-luna
-OPENAI_REASONING_EFFORT=high
+OPENAI_MODEL=gpt-6.1-terra
+OPENAI_REASONING_EFFORT=medium
 OPENROUTER_API_KEY=
 MSTUDENT_DECISION_MODEL=google/gemini-decision-1
 MSTUDENT_DECISION_ENABLED=1
@@ -24,11 +24,19 @@ không thay thế hai khóa model này. Sheets/Docs/Slides hiện đọc link c�
 
 Decision dùng `POST https://openrouter.ai/api/alpha/decisions`, auth Bearer, payload `state`. Usage đọc
 `input_tokens`, `output_tokens`, `cost`. Main agents và Assistant đều dùng custom Responses client; model lưu trong
-settings admin có thể ghi đè `OPENAI_MODEL`. Mặc định dùng API OpenAI chính thức với model `gpt-6-luna` và truyền
-`reasoning.effort=high` riêng, không gắn effort vào tên model. SDK tracing bên ngoài bị tắt. Khi tự cấu hình gateway
+settings admin có thể ghi đè `OPENAI_MODEL`. Mặc định dùng API OpenAI chính thức với model `gpt-6.1-terra` và truyền
+`reasoning.effort=medium` riêng, không gắn effort vào tên model. SDK tracing bên ngoài bị tắt. Khi tự cấu hình gateway
 khác, phải kiểm tra lại model/effort và nhà cung cấp nhận dữ liệu.
 
 ## Bốn tuyến
+
+Lịch học cá nhân dạng câu kể cũng là việc tham gia, không bị trả rỗng chỉ vì thiếu mệnh lệnh. Quy ước đã chọn khi
+chưa có giờ: sáng 08:00, chiều 13:00, tối 19:00. `schedule_prompt` được nối vào Triage/Extractor/Review/Assistant,
+kể cả prompt quản trị đã lưu từ trước. Một buổi học rõ ràng còn có bước Python `TimeDefaults` đối chiếu ngày nhận tin,
+áp giờ quy ước và ghi chú trong action; giờ cụ thể, đa ngày/đa buổi hoặc nhiều task không bị bước này ghi đè.
+
+Đơn giá chuẩn ước tính ngân sách của Terra là 1 USD/1M input và 5 USD/1M output; cached input và hóa đơn cần đối soát
+riêng. Đổi model trên server phải cập nhật giá môi trường để không tiếp tục tính theo model cũ.
 
 | Tuyến | Điều kiện | LLM chính |
 |---|---|---|

@@ -35,9 +35,14 @@ def _client(base_url: str, api_key: str) -> AsyncOpenAI:
 def build_agent(name: str, prompt_key: str, output_type=None, *, tools=None, instruction_suffix="") -> Agent:
     """Dùng cùng Responses client cho agent trích dữ liệu và trợ lý có tool."""
     cfg = agent_config.get()
+    schedule = (
+        "\n" + cfg["schedule_prompt"]
+        if prompt_key in {"triage_prompt", "extract_prompt", "review_prompt", "assistant_prompt"}
+        else ""
+    )
     return Agent(
         name=name,
-        instructions=cfg[prompt_key] + agent_config.GUARD + instruction_suffix,
+        instructions=cfg[prompt_key] + schedule + agent_config.GUARD + instruction_suffix,
         output_type=output_type,
         tools=tools or [],
         model_settings=ModelSettings(reasoning=Reasoning(effort=config.openai_reasoning_effort())),

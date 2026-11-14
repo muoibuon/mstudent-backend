@@ -127,6 +127,8 @@ def classify(text: str) -> Category:
     for cat, pats in CATEGORY_PATTERNS:
         if any(re.search(p, t) for p in pats):
             return cat
+    if re.search(r"\b(?:tôi|mình|em)\s+học\b|\b(?:tiết|buổi|lịch)\s+học\b", t):
+        return Category.class_change
     return Category.other
 
 
@@ -146,7 +148,7 @@ def find_date(text: str, ref: datetime) -> datetime | None:
             return dt
     if "hôm nay" in t or "tối nay" in t or "chiều nay" in t or "sáng nay" in t:
         return ref.replace(hour=0, minute=0, second=0, microsecond=0)
-    if "ngày mai" in t:
+    if any(phrase in t for phrase in ("ngày mai", "sáng mai", "chiều mai", "tối mai")):
         return (ref + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     matches = list(WEEKDAY_RE.finditer(t))
     if matches:
@@ -164,12 +166,61 @@ def find_date(text: str, ref: datetime) -> datetime | None:
     return None
 
 
+def default_daypart(text: str) -> tuple[str, int] | None:
+    text = _norm(text)
+    found = set()
+    for match in re.finditer(r"\b(sáng|chiều|tối)\b", text):
+        part = match.group(1)
+        after = text[match.end() :].lstrip()
+        if (
+            (
+                part == "sáng"
+                and (re.search(r"\bánh\s*$", text[: match.start()]) or re.match(r"(?:tạo|kiến)\b", after))
+            )
+            or (part == "tối" and re.match(r"ưu\b", after))
+            or (part == "chiều" and re.match(r"(?:dài|cao)\b", after))
+        ):
+            continue
+        found.add(part)
+    if len(found) == 1:
+        part = found.pop()
+        return part, {"sáng": 8, "chiều": 13, "tối": 19}[part]
+    return None
+
+
 def find_time(text: str) -> tuple[int, int] | None:
     for m in TIME_RE.finditer(_norm(text)):
         h, mi = int(m.group(1)), int(m.group(2) or 0)
         if 0 <= h <= 23 and 0 <= mi <= 59:
             return h, mi
-    return None
+    default = default_daypart(text)
+    return (default[1], 0) if default else None
+
+
+def apply_class_time_defaults(msg: Message, tasks: list[TaskOut]) -> list[TaskOut]:
+    """Apply the agreed clock only to one unambiguous class; never invent a task."""
+    text = f"{msg.subject}\n{msg.body}"
+    part = default_daypart(text)
+    if len(tasks) != 1 or tasks[0].category != Category.class_change or not part or TIME_RE.search(text):
+        return tasks
+    normalized = _norm(text)
+    references = len(list(DATE_RE.finditer(text))) + len(list(WEEKDAY_RE.finditer(normalized)))
+    references += len(
+        re.findall(
+            r"\b(?:ngày mai|sáng mai|chiều mai|tối mai|hôm nay|sáng nay|chiều nay|tối nay)\b", normalized
+        )
+    )
+    if references > 1:
+        return tasks
+    day = find_date(text, _received(msg))
+    if day is None:
+        return tasks
+    label, hour = part
+    note = f"Giờ mặc định buổi {label}: {hour:02}:00"
+    action = tasks[0].action or "Tham gia buổi học"
+    if note not in action:
+        action = action[: max(0, 198 - len(note))] + "; " + note
+    return [tasks[0].model_copy(update={"due_at": day.replace(hour=hour).isoformat(), "action": action})]
 
 
 def triage(msg: Message) -> TriageOut:

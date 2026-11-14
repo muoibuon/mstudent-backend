@@ -60,6 +60,7 @@ export function stepDescription(step, categories) {
     return (step.agent === 'Review' ? 'Xem lại độ liên quan và phân loại, rồi trích việc trong cùng một lượt. ' : 'Đọc nội dung và trích việc, hạn, môn và địa điểm. ') + (count === null ? '' : `Trích được ${count} việc.`);
   }
   if (step.agent === 'Planner') return `Tạo ${out.created?.length || 0} việc, cập nhật ${out.updated?.length || 0} việc bằng Python.`;
+  if (step.agent === 'TimeDefaults') return `Áp dụng quy ước sáng 08:00, chiều 13:00, tối 19:00 khi chưa có giờ cụ thể. Mốc đã lưu: ${out.due_at || 'chưa xác định'}.`;
   if (step.agent === 'Triage') return out.relevant === false ? 'Kết luận thông báo không liên quan.' : 'Đánh giá độ liên quan của thông báo.';
   if (step.agent === 'Documents') return 'Đọc tài liệu riêng với email; xem kết quả hoặc lỗi trong dữ liệu kỹ thuật.';
   if (step.agent === 'Routing') return 'Chọn tuyến dự phòng vì Decision tắt hoặc chưa cấu hình.';

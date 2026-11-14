@@ -17,11 +17,14 @@ python run_local.py             # in ra địa chỉ LAN, vd. http://192.168.1.5
 
 Web console (trace từng agent, sửa prompt, chạy eval): http://localhost:8000
 
-LLM chính mặc định dùng OpenAI Platform `https://api.openai.com/v1`, model `gpt-6-luna`, reasoning effort `high`
+LLM chính mặc định dùng OpenAI Platform `https://api.openai.com/v1`, model `gpt-6.1-terra`, reasoning effort `medium`
 (`OPENAI_REASONING_EFFORT`). Model lưu trước đó trong cấu hình admin có thể ghi đè mặc định môi trường.
 Decision dùng `google/gemini-decision-1` qua OpenRouter, một request hỏi độ liên quan và nhóm nội dung.
 Tin nhiễu dừng; tin rõ đi Extractor; tin mơ hồ đi Review (xem lại và trích việc trong một lượt LLM chính).
 Tắt bằng `MSTUDENT_DECISION_ENABLED=0` để dùng đường Triage → Extractor cũ. Xem [vận hành Decision](docs/DECISION_ROUTING.md).
+
+Lịch học dạng câu kể ("thứ 2 tuần sau sáng tôi học OOP") cũng được tạo việc. Nếu chưa nêu giờ, quy ước sáng 08:00,
+chiều 13:00, tối 19:00; giờ cụ thể trong tin được ưu tiên. Bước `TimeDefaults` và action ghi rõ giờ mặc định đã áp dụng.
 
 ## Trước khi push
 

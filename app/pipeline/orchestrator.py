@@ -112,6 +112,20 @@ async def classify(
             t0 = time.perf_counter()
             ext = rules.extract(msg, tri.category)
             tr.add("Extractor", "rules", t0, ext)
+    if tri.relevant and ext:
+        t0 = time.perf_counter()
+        adjusted = rules.apply_class_time_defaults(msg, ext.tasks)
+        if adjusted != ext.tasks:
+            ext = ExtractionOut(tasks=adjusted)
+            tr.add(
+                "TimeDefaults",
+                "python",
+                t0,
+                {
+                    "due_at": adjusted[0].due_at,
+                    "reason": "Áp dụng giờ mặc định theo buổi đã chọn; giờ cụ thể không bị ghi đè",
+                },
+            )
     return tri, ext, mode
 
 

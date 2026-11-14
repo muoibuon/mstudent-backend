@@ -276,6 +276,26 @@ def test_duplicate_message_uses_cache_before_both_models(client, user, routing):
     assert len(calls) == before
 
 
+@pytest.mark.parametrize("p", [0.98, 0.5])
+def test_direct_and_review_apply_agreed_class_time_without_another_model(client, user, routing, p):
+    world, calls = routing
+    world["p"] = p
+    world["category"] = Category.class_change
+    world["tasks"] = [
+        draft(category=Category.class_change, title="Học OOP").model_copy(
+            update={"course": "OOP", "due_at": "2026-11-23T09:00:00+07:00"}
+        )
+    ]
+    out = ingest(
+        client, user, {"body": "thứ 2 tuần sau sáng tôi học oop", "received_at": "2026-11-14T16:43:00+07:00"}
+    )
+    assert out["mode"] == "llm" and len(out["created"]) == 1
+    assert out["created"][0]["due_at"] == "2026-11-16T08:00:00+07:00"
+    assert "Giờ mặc định" in out["created"][0]["action"]
+    assert any(s["agent"] == "TimeDefaults" and s["kind"] == "python" for s in out["trace"])
+    assert [c[0] for c in calls] == ["Decision", "Extractor" if p == 0.98 else "Review"]
+
+
 def test_message_cache_and_tasks_are_per_user(client, user, routing):
     _, calls = routing
     second_tokens = signup(client, email="second@example.test")

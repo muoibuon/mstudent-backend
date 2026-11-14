@@ -20,5 +20,7 @@
    "expect": {"relevant": true, "category": "deadline", "due": "2026-11-16T09:00"}},
   {"body": "Lớp mình chuyển phòng học môn OOP từ P.301 sang P.405 từ tuần sau.",
    "expect": {"relevant": true, "category": "class_change"}},
-  {"body": "Chúc mừng sinh nhật bạn Lan nhé cả lớp 🎂", "expect": {"relevant": false}}
+  {"body": "Chúc mừng sinh nhật bạn Lan nhé cả lớp 🎂", "expect": {"relevant": false}},
+  {"body": "thứ 2 tuần sau sáng tôi học oop",
+   "expect": {"relevant": true, "category": "class_change", "due": "2026-11-16T08:00"}}
 ]

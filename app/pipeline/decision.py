@@ -26,7 +26,7 @@ _transport: httpx.AsyncBaseTransport | None = None  # test gán MockTransport
 CATEGORY_CRITERIA = {
     "deadline": "Có bài tập, báo cáo, đồ án, hồ sơ phải NỘP trước một thời hạn.",
     "exam": "Lịch thi, kiểm tra, bảo vệ, vấn đáp.",
-    "class_change": "Nghỉ học, học bù, đổi phòng, đổi giờ, đổi lịch học.",
+    "class_change": "Lịch học, tiết/buổi học cá nhân (kể cả 'tôi học OOP'), nghỉ học, học bù, đổi phòng/giờ/lịch.",
     "event": "Sự kiện, hội thảo, seminar, workshop, talkshow, cuộc thi, ngày hội của trường/khoa/CLB.",
     "admin": "Thủ tục: học phí, đăng ký học phần, học bổng, giấy tờ, bảo hiểm.",
     "other": "Nội dung học vụ hữu ích khác hoặc chưa rõ nhóm; không đồng nghĩa tin nhiễu.",

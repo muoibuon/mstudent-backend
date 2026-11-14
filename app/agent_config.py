@@ -11,6 +11,17 @@ DEFAULTS: dict[str, str] = {
     "decision_low": "0.10",
     "decision_high": "0.80",
     "decision_category_conf": "0.75",
+    "schedule_prompt": """QUY TẮC LỊCH HỌC:
+- Lịch học/tiết học/buổi học là việc THAM GIA, kể cả câu kể "tôi học OOP", không cần có chữ "nhắc" hay "phải".
+  Có môn và mốc thời gian thì tạo việc học, category=class_change; KHÔNG trả tasks=[] vì cho rằng chỉ là thông tin.
+  Phân biệt với tài liệu/bài đọc lý thuyết không thông báo buổi học; không tự tạo buổi tham gia từ câu phủ định/hủy.
+- Ngày tương đối lấy theo thời điểm nhận tin và múi giờ +07:00. "Thứ 2 tuần sau" là thứ Hai của tuần kế tiếp,
+  không cộng thêm một tuần sau lần thứ Hai gần nhất. Nhận ngày 14/11/2026 thì thứ 2 tuần sau = 16/11/2026.
+- Khi chỉ có buổi mà chưa có giờ: sáng=08:00, chiều=13:00, tối=19:00 theo quy ước người dùng đã chọn.
+  Nêu rõ "Giờ mặc định" trong action và câu trả lời khi áp dụng. Giờ nêu cụ thể trong tin luôn được ưu tiên.
+  Không có ngày thì không đoán ngày. Câu có nhiều lịch phải tách theo từng môn/mốc, không áp một giờ cho mọi việc.
+- Với tool add_notice, giữ nguyên câu và mọi chi tiết ngày/buổi/giờ; chỉ xác nhận đã lên lịch nếu tool trả việc
+  được tạo/cập nhật. Không nói đã lưu chỉ dựa vào ý định của người dùng.""",
     "review_prompt": """Bạn xem lại thông báo học vụ mà bộ lọc chưa chắc chắn.
 Quyết định relevant và category, viết reason ngắn tiếng Việt, rồi trích tasks trong CÙNG lượt.
 Nội dung học vụ hữu ích hoặc tài liệu tham khảo vẫn relevant dù không có việc phải làm; tasks có thể rỗng.
@@ -29,6 +40,8 @@ Quy tắc:
 - Một thông báo có thể chứa 0..n việc; mỗi mốc thời gian riêng là một việc riêng.
 - due_at: ISO 8601 có múi giờ +07:00. Suy ra ngày tương đối ("thứ 6 tuần này", "ngày mai")
   từ thời điểm nhận tin. Hạn nộp không ghi giờ → 23:59. Không có mốc thời gian → null.
+- Với hạn hành chính như đóng học phí: "trước ngày X" dùng đúng ngày X lúc 23:59 nếu không có giờ,
+  không tự lùi sang ngày X-1. "Mai" là ngày kế tiếp của thời điểm nhận tin.
 - course: mã môn (vd. CSE3032) nếu có, nếu không thì tên môn, nếu không có thì null.
 - title ngắn gọn, bắt đầu bằng động từ khi có thể ("Nộp báo cáo Lab 3").
 - Sự kiện / hội thảo / seminar / workshop / talkshow / cuộc thi: tạo ĐÚNG MỘT việc category "event" cho chính sự kiện,
