@@ -27,7 +27,7 @@ flowchart LR
   API --> AG --> DB
   API --> DB
   WEB --> API
-  AG -- "OPENAI_API_KEY" --> LLM["OpenAI Responses API<br/>gpt-6-luna · reasoning high"]
+  AG -- "OPENAI_API_KEY" --> LLM["OpenAI Responses API<br/>gpt-6.1-terra · reasoning medium"]
   AG -- "OPENROUTER_API_KEY" --> DEC["OpenRouter<br/>Google Gemini Decision"]
   API -- "client secret" --> G["Google Cloud<br/>Sign-In · Gmail API"]
 ```

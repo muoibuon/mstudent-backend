@@ -92,4 +92,5 @@ test('human explanations expose the route and real category', () => {
   assert.match(explanation, /Đi thẳng/);
   assert.match(stepDescription(extractor, {}), /1 việc/);
   assert.match(stepDescription({...extractor, error:'Error'}, {}), /không hoàn tất/);
+  assert.match(stepDescription({agent:'TimeDefaults', output:{due_at:'2026-11-16T08:00:00+07:00'}}, {}), /08:00.*13:00.*19:00/);
 });

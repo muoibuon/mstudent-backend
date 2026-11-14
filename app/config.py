@@ -31,7 +31,7 @@ TZ = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
 
 DB_PATH = os.getenv("MSTUDENT_DB", str(BACKEND_DIR / "mstudent.db"))
 # Hai model: model TRẢ LỜI (trích việc, chi tiết sự kiện, bản tin, trợ lý chat…) và model LỌC (Triage, xem decision.py).
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6.1-terra")
 
 ACCESS_TTL_MIN = int(os.getenv("MSTUDENT_ACCESS_TTL_MIN", "15"))
 REFRESH_TTL_DAYS = int(os.getenv("MSTUDENT_REFRESH_TTL_DAYS", "30"))
@@ -65,7 +65,7 @@ def openai_base_url() -> str:
 
 
 def openai_reasoning_effort() -> str:
-    effort = os.getenv("OPENAI_REASONING_EFFORT", "high")
+    effort = os.getenv("OPENAI_REASONING_EFFORT", "medium")
     if effort not in {"none", "low", "medium", "high", "xhigh", "max"}:
         raise ValueError("OPENAI_REASONING_EFFORT không hợp lệ")
     return effort
@@ -216,11 +216,11 @@ def llm_timeout_s() -> float:
 
 def price_in_per_m() -> float:
     """Ước tính USD/1M token cho ngân sách; xác nhận giá gateway trước khi đối chiếu hóa đơn."""
-    return _float_env("MSTUDENT_PRICE_IN_PER_M", 0.10)
+    return _float_env("MSTUDENT_PRICE_IN_PER_M", 1.00)
 
 
 def price_out_per_m() -> float:
-    return _float_env("MSTUDENT_PRICE_OUT_PER_M", 0.50)
+    return _float_env("MSTUDENT_PRICE_OUT_PER_M", 5.00)
 
 
 def trust_proxy() -> bool:

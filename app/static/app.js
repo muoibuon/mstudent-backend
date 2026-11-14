@@ -140,7 +140,7 @@ async function loadTraces() {
 }
 function showTrace(t) {
   const info = traceSummary(t);
-  const names = {Decision:'Decision · Lọc nhiễu & phân loại', Extractor:'LLM chính · Trích việc', Review:'LLM chính · Xem lại & trích việc', Triage:'Lọc dự phòng', Planner:'Python · Lập việc', Documents:'Đọc tài liệu', Routing:'Chọn tuyến'};
+  const names = {Decision:'Decision · Lọc nhiễu & phân loại', Extractor:'LLM chính · Trích việc', Review:'LLM chính · Xem lại & trích việc', Triage:'Lọc dự phòng', Planner:'Python · Lập việc', Documents:'Đọc tài liệu', Routing:'Chọn tuyến', TimeDefaults:'Quy ước giờ buổi học'};
   $('traceDetail').replaceChildren(
     h('div', {class:'traceOverview'},
       h('span', {class:'traceMode ' + info.key}, info.label),

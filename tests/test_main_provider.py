@@ -50,10 +50,10 @@ def gateway(monkeypatch):
         assert str(request.url) == "https://gateway.test/v1/responses"
         assert request.headers["authorization"] == "Bearer gateway-test-not-real"
         body = json.loads(request.content)
-        assert body["model"] == model
-        assert body["reasoning"]["effort"] == "high"
+        assert body["model"] == agent_config.get()["model"]
+        assert body["reasoning"]["effort"] == config.openai_reasoning_effort()
         calls.append(body)
-        return httpx.Response(200, json=_response(reply["text"], model))
+        return httpx.Response(200, json=_response(reply["text"], body["model"]))
 
     custom = AsyncOpenAI(
         base_url=config.openai_base_url(),
@@ -124,11 +124,30 @@ def test_review_schema_requires_all_fields():
         llm_agents.ReviewOut(relevant=True, category="other", reason="Hữu ích")
 
 
+def test_terra_medium_serialization_and_schedule_policy_with_saved_prompt(gateway, monkeypatch):
+    calls, reply = gateway
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "medium")
+    monkeypatch.setattr(
+        agent_config,
+        "get",
+        lambda: (
+            agent_config.DEFAULTS
+            | {"model": "gpt-6.1-terra", "review_prompt": "Prompt quản trị đã lưu trước đó"}
+        ),
+    )
+    reply["text"] = '{"relevant":true,"category":"class_change","reason":"Lịch học","tasks":[]}'
+    asyncio.run(llm_agents.llm_review(Message(body="thứ 2 tuần sau sáng tôi học oop"), 1))
+    assert calls[0]["model"] == "gpt-6.1-terra"
+    assert calls[0]["reasoning"]["effort"] == "medium"
+    assert "QUY TẮC LỊCH HỌC" in calls[0]["instructions"]
+    assert "sáng=08:00, chiều=13:00, tối=19:00" in calls[0]["instructions"]
+
+
 def test_official_openai_defaults_and_effort_validation(monkeypatch):
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.delenv("OPENAI_REASONING_EFFORT", raising=False)
     assert config.openai_base_url() == "https://api.openai.com/v1"
-    assert config.openai_reasoning_effort() == "high"
+    assert config.openai_reasoning_effort() == "medium"
     monkeypatch.setenv("OPENAI_REASONING_EFFORT", "xhigh")
     assert config.openai_reasoning_effort() == "xhigh"
     monkeypatch.setenv("OPENAI_REASONING_EFFORT", "invalid")
