@@ -86,6 +86,15 @@ def test_extract_pdf_docx_xlsx_csv():
     assert "OOP | 20/12" in csv_.text
 
 
+def test_extract_tab_separated_csv_with_cr_only_lines():
+    # Một ứng dụng iPhone xuất .csv dạng TSV với CR đơn; vẫn phải đọc được đủ cột.
+    data = 'Môn\tNgày\tGhi chú\rOOP\t20/12\t"Nộp bài"\rToán\t21/12\t"Kiểm tra"\r'.encode()
+    document = docs.extract_text("lich-tuan.csv", "text/csv", data)
+    assert document.kind == "csv"
+    assert "OOP | 20/12 | Nộp bài" in document.text
+    assert "Toán | 21/12 | Kiểm tra" in document.text
+
+
 def test_extract_rejects_bad_files():
     with pytest.raises(docs.DocError, match="chưa hỗ trợ"):
         docs.extract_text("anh.png", "image/png", b"x")

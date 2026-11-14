@@ -136,6 +136,7 @@ class ChatResponse(BaseModel):
     reply: str
     mode: str
     tool_calls: list[ToolCall] = []
+    document_context: str | None = Field(None, max_length=4000)
 
 
 class ZaloPaste(BaseModel):
