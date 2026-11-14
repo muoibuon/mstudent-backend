@@ -4,7 +4,7 @@ Máy chủ của MStudent, AI inbox cho sinh viên: đọc thông báo từ Gmai
 lọc tin nhiễu rồi biến thành **việc có hạn, ưu tiên, nhắc việc và lời mời sự kiện**.
 
 - **Repo này:** FastAPI · SQLite · agent AI (lọc: Gemini Decision, trả lời: OpenAI) · web console · triển khai VPS.
-- **App điện thoại (Expo):** https://github.com/muoibuon/mstudent-app
+- **App điện thoại (Expo):** iOS https://github.com/muoibuon/mstudent-ios · Android https://github.com/muoibuon/mstudent-android
 
 ## Chạy trong 3 phút
 
@@ -30,7 +30,7 @@ MSTUDENT_OFFLINE=1 python -m eval.run_eval      # baseline bộ luật
    Tạo nhánh việc từ `dev`: `git checkout dev && git pull && git checkout -b <việc-ngắn-gọn>` (vd. `fix-gmail-sync`),
    mở PR vào `dev`. Không push thẳng vào `master`; `dev` → `master` bằng PR khi đã thử xong.
 2. Mỗi PR một việc; test và lint phải xanh; mô tả ngắn: làm gì, test ra sao, chưa kiểm tra được gì.
-3. **Đổi API** (`app/models.py`, `app/routers/`): ghi rõ trong PR và mở PR kèm ở repo app (`lib/types.ts`, `lib/api.ts`).
+3. **Đổi API** (`app/models.py`, `app/routers/`): ghi rõ trong PR và mở PR kèm ở **cả hai** repo app (iOS và Android) (`lib/types.ts`, `lib/api.ts`).
 4. Không commit `.env`, `.secret_key`, `*.db`, khoá API. Quy tắc đầy đủ: [`AGENTS.md`](AGENTS.md).
 
 ## Triển khai (VPS Ubuntu)

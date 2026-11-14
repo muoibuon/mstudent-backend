@@ -1,7 +1,7 @@
 # AGENTS.md — MStudent backend
 
-> Repo này là **máy chủ** (FastAPI + agent AI + web console). App điện thoại ở repo riêng: https://github.com/muoibuon/mstudent-app
-> Đổi API (`app/models.py`, `app/routers/`) → mở PR tương ứng ở repo app để cập nhật `lib/types.ts` và `lib/api.ts`.
+> Repo này là **máy chủ** (FastAPI + agent AI + web console). App điện thoại ở hai repo riêng: iOS https://github.com/muoibuon/mstudent-ios · Android https://github.com/muoibuon/mstudent-android
+> Đổi API (`app/models.py`, `app/routers/`) → mở PR tương ứng ở **cả hai** repo app để cập nhật `lib/types.ts` và `lib/api.ts`.
 
 Hướng dẫn cho mọi coding agent (Codex, Claude Code, Cursor, Copilot) làm việc trong repo này.
 
