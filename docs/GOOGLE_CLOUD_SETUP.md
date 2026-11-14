@@ -43,7 +43,7 @@ Không dùng: Gemini (AI chạy bằng OpenAI theo lựa chọn của đội), G
 
 ```bash
 # Bản build local (expo run:android) — khoá debug
-keytool -list -v -keystore mstudent-app: android/app/debug.keystore -alias androiddebugkey -storepass android | grep SHA1
+keytool -list -v -keystore mstudent-app/android/app/debug.keystore -alias androiddebugkey -storepass android | grep SHA1
 # Bản build bằng EAS
 npx eas-cli@latest credentials   # chọn Android → xem SHA-1
 ```

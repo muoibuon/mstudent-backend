@@ -45,7 +45,7 @@ Nguyên tắc: **mọi bí mật ở server** (khoá LLM, client secret Google, 
 | `app/db.py`, `repo.py` | Schema SQLite và truy vấn (luôn lọc theo `user_id`) |
 | `app/google_api.py` | Kiểm ID token, đổi mã uỷ quyền, Gmail REST |
 | `app/static/` | Web console cho nhà phát triển (không phải kênh demo) |
-| `mstudent-app: ` | App Expo cho iOS + Android |
+| `mstudent-app/` | App Expo cho iOS + Android |
 
 ## 3. Pipeline agent
 

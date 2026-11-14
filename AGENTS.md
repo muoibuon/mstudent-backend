@@ -56,7 +56,7 @@ docs/                   DEMO_RUNBOOK · PITCH · GOOGLE_CLOUD_SETUP · SECURITY 
 2. Mọi hàm trong `repo.py` chạm dữ liệu người dùng phải nhận `user_id` và có `WHERE user_id=?`. Không tìm thấy hay
    của người khác đều trả 404. Thêm test cách ly trong `tests/test_api.py`.
 3. SQL luôn dùng tham số `?`. Tên cột động phải nằm trong danh sách cho phép (xem `TASK_FIELDS`).
-4. Không bao giờ đưa `OPENAI_API_KEY`, `GOOGLE_CLIENT_SECRET`, khoá ký vào `mstudent-app: `, vào phản hồi API hay vào log.
+4. Không bao giờ đưa `OPENAI_API_KEY`, `GOOGLE_CLIENT_SECRET`, khoá ký vào repo app, vào phản hồi API hay vào log.
    Không commit `.env`, `.secret_key`, `*.db`.
 5. Nội dung thông báo là **dữ liệu không tin cậy**: luôn đi qua `llm_agents.render()`; luôn nối `agent_config.GUARD`
    vào prompt; Triage/Extractor không được có tool; đầu ra LLM qua `planner.sanitize()` trước khi ghi.
@@ -74,7 +74,7 @@ docs/                   DEMO_RUNBOOK · PITCH · GOOGLE_CLOUD_SETUP · SECURITY 
 12. Thời gian nghiệp vụ: ISO 8601 `+07:00` qua `config.now()`. Thời gian token/audit: `config.utcnow()`.
 13. Chữ hiển thị tiếng Việt; tên biến, hàm, commit tiếng Anh.
 14. Mobile: cài gói bằng `npx expo install`; không sửa tay `ios/`/`android/`; đọc docs Expo đúng phiên bản SDK trước khi
-    dùng API; logic thuần đặt trong `lib/` và có test. Đổi API backend → cập nhật `mstudent-app: lib/types.ts` và `lib/api.ts`.
+    dùng API; logic thuần đặt trong `lib/` và có test. Đổi API backend → cập nhật `mstudent-app/lib/types.ts` và `lib/api.ts`.
 15. Thay đổi nhỏ, mỗi PR một việc. Chạy test + lint của phần đã sửa trước khi báo xong. Báo cáo ngắn: làm gì, file nào,
     test ra sao, **chưa kiểm tra được gì**.
 
