@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bật AI lọc (Google Gemini Decision) trên máy chủ. Chạy TRÊN MÁY CHỦ:  sudo bash backend/deploy/set_gemini_key.sh
+# Bật AI lọc (Google Gemini Decision) trên máy chủ. Chạy TRÊN MÁY CHỦ:  sudo bash deploy/set_gemini_key.sh
 # Khoá được gõ/dán ở chế độ ẩn (không hiện trên màn hình, không vào lịch sử lệnh), ghi vào /etc/mstudent.env (quyền 600).
 # Lấy khoá: https://aistudio.google.com/apikey . Tắt lại: chạy script và để trống khoá.
 set -euo pipefail

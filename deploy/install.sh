@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Cài hoặc cập nhật MStudent backend trên VPS Ubuntu/Debian. Chạy lại bao nhiêu lần cũng được.
 #
-#   sudo bash backend/deploy/install.sh        (chạy từ thư mục gốc của mã nguồn đã giải nén)
+#   sudo bash deploy/install.sh        (chạy từ thư mục gốc của mã nguồn đã giải nén)
 #
 # Lần đầu: script tạo /etc/mstudent.env (tự sinh khoá ký) rồi dừng để bạn điền OPENAI_API_KEY và
 # MSTUDENT_ADMIN_EMAILS. Điền xong chạy lại script để khởi động dịch vụ.
 set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "Hãy chạy bằng sudo."; exit 1; }
-SRC="$(cd "$(dirname "$0")/.." && pwd)"          # thư mục backend/ của mã nguồn
+SRC="$(cd "$(dirname "$0")/.." && pwd)"          # thư mục  của mã nguồn
 APP=/opt/mstudent
 ENV_FILE=/etc/mstudent.env
 
@@ -23,13 +23,13 @@ install -d -o mstudent -g mstudent -m 700 "$APP/data" /var/backups/mstudent
 
 echo "==> Mã nguồn → $APP/app/backend"
 rsync -a --delete --exclude .venv --exclude __pycache__ --exclude '*.db*' --exclude .env --exclude .secret_key \
-  "$SRC/" "$APP/app/backend/"
+  "$SRC/" "$APP/app/"
 chown -R mstudent:mstudent "$APP/app"
 
 echo "==> Thư viện Python"
 [ -x "$APP/venv/bin/python" ] || sudo -u mstudent python3 -m venv "$APP/venv"
 sudo -u mstudent "$APP/venv/bin/pip" install -q --upgrade pip
-sudo -u mstudent "$APP/venv/bin/pip" install -q -r "$APP/app/backend/requirements.txt"
+sudo -u mstudent "$APP/venv/bin/pip" install -q -r "$APP/app/requirements.txt"
 
 echo "==> Cấu hình"
 if [ ! -f "$ENV_FILE" ]; then

@@ -1,6 +1,6 @@
 """MStudent API.
 
-Chạy local cho điện thoại trong cùng mạng:  python run_local.py   (trong thư mục backend/)
+Chạy local cho điện thoại trong cùng mạng:  python run_local.py   (ở thư mục gốc repo)
 """
 
 from __future__ import annotations

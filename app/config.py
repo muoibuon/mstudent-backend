@@ -1,4 +1,4 @@
-"""Cấu hình qua biến môi trường (đọc từ backend/.env nếu có)."""
+"""Cấu hình qua biến môi trường (đọc từ .env nếu có)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_dotenv() -> None:
-    """Đọc backend/.env mà không cần python-dotenv. Biến đã có trong môi trường được giữ nguyên."""
+    """Đọc .env mà không cần python-dotenv. Biến đã có trong môi trường được giữ nguyên."""
     env = BACKEND_DIR / ".env"
     if not env.exists():
         return
@@ -111,7 +111,7 @@ def secret_key() -> str:
     """Khoá ký JWT và mã hoá token Google.
 
     Ưu tiên MSTUDENT_SECRET_KEY. Nếu chưa đặt (chạy local), tự sinh một khoá ngẫu nhiên và lưu
-    vào backend/.secret_key (quyền 600, đã có trong .gitignore) để token không mất hiệu lực sau khi khởi động lại.
+    vào .secret_key (quyền 600, đã có trong .gitignore) để token không mất hiệu lực sau khi khởi động lại.
     """
     global _secret_cache
     env = os.getenv("MSTUDENT_SECRET_KEY")
