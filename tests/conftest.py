@@ -12,6 +12,13 @@ from fastapi.testclient import TestClient
 from app import config, security
 
 
+@pytest.fixture(autouse=True)
+def isolated_provider_credentials(monkeypatch):
+    """Local .env credentials must never turn mocked tests into paid requests."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "t.db"))

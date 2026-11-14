@@ -94,6 +94,10 @@
         <div class="notice hidden" id="cfgNotAdmin">Bạn không phải quản trị viên: chỉ xem được model. Thêm email của bạn vào MSTUDENT_ADMIN_EMAILS trên server để sửa prompt và chạy eval.</div>
         <div class="notice hidden" id="cfgOffline">Đang chạy offline (không có OPENAI_API_KEY): prompt và model chỉ có hiệu lực khi bật LLM. Trợ lý và pipeline đang dùng luật.</div>
         <label for="cfg-model">Model</label><input id="cfg-model">
+        <label for="cfg-decision_low">Decision — ngưỡng bỏ qua (0–1)</label><input id="cfg-decision_low" type="number" min="0" max="1" step="0.01">
+        <label for="cfg-decision_high">Decision — ngưỡng đi thẳng (0–1)</label><input id="cfg-decision_high" type="number" min="0" max="1" step="0.01">
+        <label for="cfg-decision_category_conf">Decision — độ tin cậy nhãn tối thiểu (0–1)</label><input id="cfg-decision_category_conf" type="number" min="0" max="1" step="0.01">
+        <label for="cfg-review_prompt">Review — xem lại và trích việc trong một lượt</label><textarea class="cfgPrompt" id="cfg-review_prompt"></textarea>
         <label for="cfg-triage_prompt">Triage agent — lọc thông báo</label><textarea class="cfgPrompt" id="cfg-triage_prompt"></textarea>
         <label for="cfg-extract_prompt">Extractor agent — tách việc cần làm</label><textarea class="cfgPrompt" id="cfg-extract_prompt"></textarea>
         <label for="cfg-digest_prompt">Digest agent — bản tin</label><textarea class="cfgPrompt" id="cfg-digest_prompt"></textarea>

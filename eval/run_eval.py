@@ -9,6 +9,7 @@ Cũng chạy được từ tab "Cấu hình agent" trên UI.
 from __future__ import annotations
 
 import asyncio
+import json
 
 from app.evaluation import evaluate
 
@@ -20,6 +21,7 @@ async def main() -> None:
     print(f"\nChế độ: {r['mode']}")
     for k, s in r["scores"].items():
         print(f"  {k:<9} {s['ok']}/{s['n']} = {s['pct']}%" if s["n"] else f"  {k:<9} -")
+    print(json.dumps(r["metrics"], ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

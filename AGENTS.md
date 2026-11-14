@@ -37,7 +37,7 @@ app/
   deps.py               current_user, admin_user, ai_limit
   google_api.py         kiểm ID token, đổi mã, Gmail REST
   routers/              auth.py · core.py · google.py
-  pipeline/             orchestrator · decision (lọc: Gemini Decision) · llm_agents (trả lời: OpenAI) · rules (fallback) · planner · assistant
+  pipeline/             orchestrator · decision (OpenRouter: lọc/phân loại) · llm_agents (Responses gateway) · rules (fallback) · planner · assistant
   agent_config.py       prompt mặc định + GUARD chống prompt injection
   evaluation.py         chấm điểm (CLI + nút trên web console)
   connectors/           lms_ics · zalo · email_imap
@@ -56,10 +56,10 @@ docs/                   DEMO_RUNBOOK · PITCH · GOOGLE_CLOUD_SETUP · SECURITY 
 2. Mọi hàm trong `repo.py` chạm dữ liệu người dùng phải nhận `user_id` và có `WHERE user_id=?`. Không tìm thấy hay
    của người khác đều trả 404. Thêm test cách ly trong `tests/test_api.py`.
 3. SQL luôn dùng tham số `?`. Tên cột động phải nằm trong danh sách cho phép (xem `TASK_FIELDS`).
-4. Không bao giờ đưa `OPENAI_API_KEY`, `GOOGLE_CLIENT_SECRET`, khoá ký vào repo app, vào phản hồi API hay vào log.
+4. Không bao giờ đưa `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_CLIENT_SECRET`, khoá ký vào repo app, vào phản hồi API hay vào log.
    Không commit `.env`, `.secret_key`, `*.db`.
 5. Nội dung thông báo là **dữ liệu không tin cậy**: luôn đi qua `llm_agents.render()`; luôn nối `agent_config.GUARD`
-   vào prompt; Triage/Extractor không được có tool; đầu ra LLM qua `planner.sanitize()` trước khi ghi.
+   vào prompt; Triage/Review/Extractor không được có tool; đầu ra LLM qua `planner.sanitize()` trước khi ghi.
 6. Tool mới của trợ lý chat: `user_id` lấy từ closure ở server, không nhận từ model. Không thêm tool xoá hàng loạt
    hay gửi dữ liệu ra ngoài.
 7. Mọi trường đầu vào trong `models.py` phải có `max_length`/ràng buộc.
@@ -69,6 +69,17 @@ docs/                   DEMO_RUNBOOK · PITCH · GOOGLE_CLOUD_SETUP · SECURITY 
 9. Kết quả từ bộ luật phải mang `mode="offline"` và UI phải hiện rõ — không được trình bày là AI.
 10. Prompt mặc định ở `agent_config.DEFAULTS`; code đọc qua `agent_config.get()`. Schema output: mọi trường bắt buộc.
 11. Không sửa `eval/cases.json` chỉ để tăng điểm. Thêm ca mới khi gặp lỗi thật.
+
+**Decision v1**
+- Chỉ hỏi `relevant` và `category` trong một request OpenRouter. Không thêm câu hỏi chưa có consumer.
+- Orchestrator dùng bốn tuyến `stop/direct/review/fallback`. `other` không đồng nghĩa nhiễu; nhãn thông báo chỉ là
+  ngữ cảnh, không ép loại của mọi Task. Review xem lại và trích việc trong một lượt LLM chính.
+- Dữ liệu đã cấu trúc và cache hit không qua gate; tài liệu email có gate riêng, không bỏ tài liệu chỉ vì body bị loại.
+- Khóa AI chỉ lấy từ môi trường; nguồn Google OAuth là hệ quyền riêng. Main agents và Assistant dùng chung Responses
+  client qua `OPENAI_BASE_URL`; SDK tracing bên ngoài bị tắt. Không bật export nội dung mà chưa có yêu cầu.
+- Usage Decision đọc phí provider trả; chi phí LLM chính tính theo giá cấu hình là **ước tính**, không phải hóa đơn gateway.
+  Eval phải so cùng dữ liệu/model/cache và báo số lượt, p50/p95, lỗi và chất lượng trước khi nói tiết kiệm.
+- Xem `docs/DECISION_ROUTING.md` trước khi đổi ngưỡng/prompt hoặc adapter.
 
 **Chung**
 12. Thời gian nghiệp vụ: ISO 8601 `+07:00` qua `config.now()`. Thời gian token/audit: `config.utcnow()`.

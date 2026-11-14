@@ -12,9 +12,9 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from .. import budget, config, repo
-from ..models import Category, IngestResult, Message, Priority, Source, Task
-from . import planner, rules
+from .. import agent_config, budget, config, repo
+from ..models import Category, ExtractionOut, IngestResult, Message, Priority, Source, Task, TriageOut
+from . import decision, planner, rules
 
 log = logging.getLogger("mstudent")
 WEEKDAY_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"]
@@ -44,42 +44,64 @@ class Tracer:
 
 
 def _short_error(e: Exception) -> str:
-    return f"{type(e).__name__}: {str(e)[:160]}"
+    # Provider exceptions may include credentials or echoed input.
+    return type(e).__name__
 
 
-async def ingest(user_id: int, msg: Message) -> IngestResult:
-    received = msg.received_at or config.now().isoformat()
-    msg = msg.model_copy(update={"received_at": received})
-    msg = msg.model_copy(update={"id": _msg_id(msg)})
-
-    seen = repo.get_message(user_id, msg.id)
-    if seen:  # đã xử lý → không gọi lại LLM (tiết kiệm chi phí khi quét hộp thư nhiều lần)
-        return IngestResult(
-            message_id=msg.id,
-            relevant=bool(seen["relevant"]),
-            category=Category(seen["category"]),
-            reason="Tin này đã được xử lý trước đó",
-            mode="cache",
-            duplicate=True,
-        )
-
-    tr = Tracer()
+async def classify(
+    user_id: int | None, msg: Message, tr: Tracer
+) -> tuple[TriageOut, ExtractionOut | None, str]:
+    """Shared gate for ingest/eval; writes usage only, never messages or tasks."""
     mode = "offline"
     tri = ext = None
     if budget.llm_allowed(user_id):
         from . import llm_agents
 
+        route, dres = "fallback", None
+        thresholds = agent_config.decision_thresholds()
+        if config.decision_enabled():
+            t0 = time.perf_counter()
+            try:
+                dres = await decision.decide(msg, user_id)
+                route = decision.route(dres, thresholds)
+                tr.add("Decision", "llm", t0, {"route": route, **dres.summary()})
+            except Exception as e:
+                tr.add("Decision", "llm", t0, {"route": "fallback"}, error=_short_error(e))
+                log.warning("Decision lỗi, dùng luồng cũ: %s", type(e).__name__)
+        else:
+            tr.add("Routing", "python", time.perf_counter(), {"route": "fallback", "reason": "Decision tắt"})
         t0 = time.perf_counter()
         try:
-            tri = await llm_agents.llm_triage(msg, user_id)
-            tr.add("Triage", "llm", t0, tri)
-            if tri.relevant:
-                t0 = time.perf_counter()
-                ext = await llm_agents.llm_extract(msg, user_id)
-                tr.add("Extractor", "llm", t0, ext)
+            if route != "stop" and not budget.llm_allowed(user_id):
+                raise RuntimeError("AI budget exhausted")
+            if route == "review":
+                review = await llm_agents.llm_review(msg, user_id)
+                tri = TriageOut(relevant=review.relevant, category=review.category, reason=review.reason)
+                ext = ExtractionOut(tasks=review.tasks if review.relevant else [])
+                tr.add("Review", "llm", t0, review)
+            else:
+                if route in ("stop", "direct"):
+                    tri = TriageOut(
+                        relevant=route == "direct",
+                        category=dres.category,
+                        reason=f"Decision: {'bỏ qua' if route == 'stop' else 'cần chú ý'} ({dres.relevant:.0%})",
+                    )
+                else:
+                    tri = await llm_agents.llm_triage(msg, user_id)
+                    tr.add("Triage", "llm", t0, tri)
+                if tri.relevant:
+                    if not budget.llm_allowed(user_id):
+                        raise RuntimeError("AI budget exhausted")
+                    t0 = time.perf_counter()
+                    hint = dres.hint(thresholds["category_conf"]) if route == "direct" else None
+                    ext = await llm_agents.llm_extract(msg, user_id, hint=hint)
+                    tr.add("Extractor", "llm", t0, ext)
+                    # Category is per task. A weak notice label must not trigger event rewriting.
+                    if route == "direct" and ext.tasks and dres.category_conf < thresholds["category_conf"]:
+                        tri = tri.model_copy(update={"category": ext.tasks[0].category})
             mode = "llm"
         except Exception as e:  # mạng/credit/model lỗi → không làm hỏng luồng
-            log.warning("LLM lỗi, chuyển sang offline: %s", e)
+            log.warning("LLM lỗi, chuyển sang offline: %s", type(e).__name__)
             tr.add("LLM", "llm", t0, error=f"{_short_error(e)} → chuyển sang luật")
             tri = ext = None
     if tri is None:
@@ -90,12 +112,32 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
             t0 = time.perf_counter()
             ext = rules.extract(msg, tri.category)
             tr.add("Extractor", "rules", t0, ext)
+    return tri, ext, mode
+
+
+async def ingest(user_id: int, msg: Message) -> IngestResult:
+    received = msg.received_at or config.now().isoformat()
+    msg = msg.model_copy(update={"received_at": received})
+    msg = msg.model_copy(update={"id": _msg_id(msg)})
+    seen = repo.get_message(user_id, msg.id)
+    if seen:
+        return IngestResult(
+            message_id=msg.id,
+            relevant=bool(seen["relevant"]),
+            category=Category(seen["category"]),
+            reason="Tin này đã được xử lý trước đó",
+            mode="cache",
+            duplicate=True,
+        )
+    tr = Tracer()
+    tri, ext, mode = await classify(user_id, msg, tr)
 
     repo.save_message(user_id, msg, tri.relevant, tri.category, tri.reason[:300])
     created: list[Task] = []
     updated: list[Task] = []
     # 003: tin được phân loại là sự kiện nhưng Extractor chỉ trả việc "đăng ký …" (deadline) → vẫn phải thành lời mời.
-    is_event = tri.relevant and tri.category == Category.event and ext and ext.tasks
+    direct = any(s.get("output", {}).get("route") == "direct" for s in tr.steps)
+    is_event = not direct and tri.relevant and tri.category == Category.event and ext and len(ext.tasks) == 1
     if is_event and not any(d.category == Category.event for d in ext.tasks):
         ext.tasks[0] = ext.tasks[0].model_copy(update={"category": Category.event})
     if tri.relevant and ext and ext.tasks:
@@ -188,7 +230,7 @@ async def digest(user_id: int) -> dict:
 
             return {"mode": "llm", "text": await llm_agents.llm_digest(tasks, user_id)}
         except Exception as e:
-            log.warning("Digest LLM lỗi: %s", e)
+            log.warning("Digest LLM lỗi: %s", type(e).__name__)
     return {"mode": "offline", "text": digest_text(tasks, ref)}
 
 
