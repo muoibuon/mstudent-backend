@@ -84,7 +84,12 @@ def _client() -> httpx.AsyncClient:
 
 
 async def fetch_csv(sheet_id: str, gid: str) -> str:
-    url = export_url(sheet_id, gid)
+    return await fetch_google_export(export_url(sheet_id, gid))
+
+
+async def fetch_google_export(url: str) -> str:
+    """Tải bản xuất (csv/txt) của tài liệu Google công khai. Chỉ theo chuyển hướng tới docs.google.com /
+    *.googleusercontent.com, kiểm IP công khai, ≤ 1 MB; trang đăng nhập (tài liệu riêng tư) → SheetError(PRIVATE_MSG)."""
     async with _client() as client:
         for _ in range(4):  # tối đa 3 lần chuyển hướng
             host = urlparse(url).hostname or ""

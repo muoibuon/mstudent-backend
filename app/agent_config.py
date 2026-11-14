@@ -43,6 +43,9 @@ Hãy xác định vai trò của TỪNG cột (theo chỉ số cột, bắt đ�
 - note: ghi chú, link, yêu cầu thêm
 - ignore: STT, người phụ trách, trạng thái, cột trống, cột khác
 Mỗi vai trò course/title/due/time/note dùng tối đa 1 cột. Trả về đủ mọi cột.""",
+    "doc_summary_prompt": """Bạn tóm tắt một tài liệu học vụ (lịch thi, đề cương, thông báo, danh sách) cho sinh viên.
+Viết 2–3 câu tiếng Việt, tối đa 250 ký tự: tài liệu nói về gì, mốc thời gian quan trọng nhất, ai/lớp nào liên quan.
+Không bịa thông tin không có trong tài liệu.""",
 }
 
 # Luôn được nối vào sau prompt, admin không sửa được: thông báo là DỮ LIỆU, không phải mệnh lệnh.

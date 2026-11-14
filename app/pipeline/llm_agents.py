@@ -90,6 +90,13 @@ async def llm_map_sheet(header: list[str], samples: list[list[str]], user_id: in
     return res.final_output
 
 
+async def llm_summarize_doc(name: str, text: str, user_id: int | None = None) -> str:
+    """Tóm tắt 2–3 câu một tài liệu trong email (002 US7). Không có tool; nội dung bọc như thông báo."""
+    payload = f"<thong_bao>\nTên tệp: {_clean(name)[:120]}\n---\n{_clean(text)[:6000]}\n</thong_bao>"
+    res = await run_llm(_agent("DocSummarizer", "doc_summary_prompt"), payload, user_id=user_id)
+    return clean_text(str(res.final_output))[:300]
+
+
 async def llm_digest(tasks: list[Task], user_id: int | None = None) -> str:
     payload = json.dumps([t.model_dump(mode="json") for t in tasks], ensure_ascii=False)
     res = await run_llm(

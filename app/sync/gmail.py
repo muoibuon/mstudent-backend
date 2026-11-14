@@ -12,7 +12,7 @@ import time
 
 from .. import config, google_api, repo, security
 from ..pipeline import orchestrator
-from . import scheduler
+from . import docs_ingest, scheduler
 from .scheduler import AuthError, RunResult, TemporaryError
 
 log = logging.getLogger("mstudent")
@@ -43,9 +43,13 @@ async def run(conn: dict) -> RunResult:
             if repo.get_message(uid, f"gmail-{gid}"):
                 res.skipped += 1  # đã xử lý → không tải, không gọi AI
                 continue
-            out = await orchestrator.ingest(uid, await google_api.get_message(token, gid))
+            msg, attachments = await google_api.get_message_parts(token, gid)
+            out = await orchestrator.ingest(uid, msg)
             res.created += out.created
             res.updated += out.updated
+            for doc_out in await docs_ingest.ingest_documents(uid, token, gid, msg, attachments, out):
+                res.created += doc_out.created
+                res.updated += doc_out.updated
             res.mode = "llm" if out.mode == "llm" or res.mode == "llm" else (res.mode or out.mode)
         await _renew_watch(token, state)
     except google_api.AuthRevoked as e:

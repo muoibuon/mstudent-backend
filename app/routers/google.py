@@ -8,6 +8,7 @@ from .. import config, google_api, repo, security
 from ..deps import ai_limit, client_ip, current_user, enforce
 from ..models import GmailSyncRequest, GoogleConnectRequest
 from ..pipeline import orchestrator
+from ..sync import docs_ingest
 
 router = APIRouter(prefix="/api/google", tags=["google"])
 
@@ -59,8 +60,11 @@ async def gmail_sync(body: GmailSyncRequest, user: dict = Depends(ai_limit)):
         for gid in ids:
             if repo.get_message(user["id"], f"gmail-{gid}"):
                 continue  # đã xử lý ở lần quét trước → không tải, không gọi LLM
-            msg = await google_api.get_message(token, gid)
-            results.append(await orchestrator.ingest(user["id"], msg))
+            msg, attachments = await google_api.get_message_parts(token, gid)
+            out = await orchestrator.ingest(user["id"], msg)
+            results.append(out)
+            # 002 US7: tệp đính kèm / link tài liệu của thư liên quan → thêm việc + tóm tắt
+            results += await docs_ingest.ingest_documents(user["id"], token, gid, msg, attachments, out)
     except google_api.GoogleError as e:
         raise HTTPException(502, str(e)) from e
     repo.touch_google_sync(user["id"])

@@ -141,7 +141,12 @@ def _b64(data: str) -> str:
 
 
 def _find_part(payload: dict, mime: str) -> str | None:
-    if payload.get("mimeType") == mime and payload.get("body", {}).get("data"):
+    # Phần có tên tệp là tệp đính kèm (vd. ghi-chu.txt), không phải thân email.
+    if (
+        payload.get("mimeType") == mime
+        and payload.get("body", {}).get("data")
+        and not payload.get("filename")
+    ):
         return _b64(payload["body"]["data"])
     for part in payload.get("parts", []) or []:
         found = _find_part(part, mime)
@@ -341,3 +346,60 @@ async def classroom_snapshot(token: str, max_courses: int = 30) -> list[dict]:
             )  # fmt: skip
             out.append({"course": co, "coursework": work, "submissions": subs, "announcements": anns})
         return out
+
+
+# ---------------- Tệp đính kèm (002 US7) ----------------
+
+
+def attachments_of(raw: dict) -> list[dict]:
+    """Tệp đính kèm của một thư (tên, mime, kích thước, attachmentId hoặc dữ liệu nhỏ nằm sẵn trong thư)."""
+    out: list[dict] = []
+
+    def walk(part: dict) -> None:
+        body = part.get("body", {}) or {}
+        if part.get("filename") and (body.get("attachmentId") or body.get("data")):
+            out.append(
+                {
+                    "name": str(part["filename"])[:200],
+                    "mime": str(part.get("mimeType", ""))[:100],
+                    "size": int(body.get("size") or 0),
+                    "att_id": body.get("attachmentId"),
+                    "data": body.get("data"),
+                }
+            )
+        for child in part.get("parts", []) or []:
+            walk(child)
+
+    walk(raw.get("payload", {}) or {})
+    return out
+
+
+async def get_message_parts(token: str, gmail_id: str) -> tuple[Message, list[dict]]:
+    async with _client() as c:
+        r = await c.get(
+            f"{GMAIL_URL}/messages/{gmail_id}",
+            params={"format": "full"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    _check(r, "đọc thư")
+    raw = r.json()
+    return parse_gmail(raw), attachments_of(raw)
+
+
+async def get_attachment(token: str, gmail_id: str, att: dict, max_bytes: int) -> bytes:
+    """Nội dung tệp đính kèm (giải mã base64url). Quá `max_bytes` → GoogleError, không tải."""
+    if att.get("size", 0) > max_bytes:
+        raise GoogleError("Tệp quá lớn")
+    data = att.get("data")
+    if not data:
+        async with _client() as c:
+            r = await c.get(
+                f"{GMAIL_URL}/messages/{gmail_id}/attachments/{att['att_id']}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        _check(r, "tải tệp đính kèm")
+        data = r.json().get("data", "")
+    blob = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    if len(blob) > max_bytes:
+        raise GoogleError("Tệp quá lớn")
+    return blob
