@@ -13,12 +13,12 @@ import logging
 import re
 import unicodedata
 from datetime import datetime
-from html import escape
+from html import escape, unescape
 
 from .. import budget, config, repo
 from ..connectors import docs
 from ..models import Category, ChatResponse, ChatTurn, Message, Priority, Source, ToolCall
-from . import llm_agents, orchestrator, planner, rules
+from . import llm_agents, orchestrator, planner, rules, schedule_import
 
 log = logging.getLogger("mstudent")
 
@@ -193,12 +193,44 @@ async def _offline_chat(user_id: int, message: str) -> ChatResponse:
 
 
 async def chat(user_id: int, message: str, history: list[ChatTurn]) -> ChatResponse:
+    if schedule_import.wants_schedule(message):
+        for turn in reversed(history[-10:]):
+            if turn.role != "user":
+                continue
+            match = re.search(r"<thong_bao>\s*Tệp: ([^\n]+)\n(.*?)\n</thong_bao>", turn.content, re.S)
+            if match and match.group(1).lower().endswith((".csv", ".xlsx")):
+                return _import_schedule(user_id, unescape(match.group(2)), unescape(match.group(1)))
     if budget.llm_allowed(user_id):
         try:
             return await _llm_chat(user_id, message, history)
         except Exception as e:
             log.warning("Chat LLM lỗi, chuyển offline: %s", type(e).__name__)
     return await _offline_chat(user_id, message)
+
+
+def _import_schedule(user_id: int, text: str, filename: str) -> ChatResponse:
+    created, skipped = schedule_import.add(user_id, text, filename)
+    if created:
+        first = min(t.due_at for t in created if t.due_at)
+        last = max(t.due_at for t in created if t.due_at)
+        reply = (
+            f"Đã thêm {len(created)} buổi học vào Lịch, từ {datetime.fromisoformat(first):%d/%m} "
+            f"đến {datetime.fromisoformat(last):%d/%m}."
+        )
+        if skipped:
+            reply += f" Bỏ qua {skipped} buổi đã có."
+    elif skipped:
+        reply = f"Các buổi học trong 7 ngày tới đã có trong Lịch ({skipped} buổi); không tạo trùng."
+    else:
+        reply = (
+            "Chưa tìm thấy buổi học sắp tới trong bảng. Tệp CSV cần có môn, ngày, giờ bắt đầu "
+            "và 'Hàng tuần' nếu lịch lặp; những ngày đã qua mà không lặp sẽ được bỏ qua."
+        )
+    return ChatResponse(
+        reply=reply,
+        mode="offline",
+        tool_calls=[ToolCall(tool="import_schedule", result=reply)],
+    )
 
 
 async def chat_with_file(
@@ -209,6 +241,13 @@ async def chat_with_file(
         question.strip()
         or "Tóm tắt tệp này và các mốc thời gian quan trọng. Chưa tạo việc nếu mình chưa yêu cầu."
     )
+    if document.kind in ("csv", "xlsx") and schedule_import.wants_schedule(prompt):
+        response = _import_schedule(user_id, document.text, document.name)
+        response.document_context = (
+            f"{prompt}\n\n<thong_bao>\nTệp: {escape(document.name)[:120]}\n"
+            f"{escape(docs.focus(document.text, limit=2700))[:2700]}\n</thong_bao>"
+        )
+        return response
     content = docs.focus(document.text, limit=2800)
     message = (
         f"{prompt}\n\n<thong_bao>\nTệp: {escape(document.name)[:120]}\n{escape(content)[:2700]}\n</thong_bao>"
