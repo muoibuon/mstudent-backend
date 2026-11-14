@@ -14,8 +14,9 @@ import re
 import time
 from functools import lru_cache
 
-from agents import Agent, OpenAIResponsesModel, RunConfig, Runner, set_tracing_disabled
+from agents import Agent, ModelSettings, OpenAIResponsesModel, RunConfig, Runner, set_tracing_disabled
 from openai import AsyncOpenAI
+from openai.types.shared import Reasoning
 from pydantic import BaseModel, Field
 
 from .. import agent_config, budget, config
@@ -39,6 +40,7 @@ def build_agent(name: str, prompt_key: str, output_type=None, *, tools=None, ins
         instructions=cfg[prompt_key] + agent_config.GUARD + instruction_suffix,
         output_type=output_type,
         tools=tools or [],
+        model_settings=ModelSettings(reasoning=Reasoning(effort=config.openai_reasoning_effort())),
         model=OpenAIResponsesModel(
             model=cfg["model"],
             openai_client=_client(config.openai_base_url(), config.openai_api_key()),

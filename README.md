@@ -3,7 +3,7 @@
 Máy chủ của MStudent, AI inbox cho sinh viên: đọc thông báo từ Gmail, Google Classroom, bảng lớp, LMS và nhóm Zalo,
 lọc tin nhiễu rồi biến thành **việc có hạn, ưu tiên, nhắc việc và lời mời sự kiện**.
 
-- **Repo này:** FastAPI · SQLite · Decision lọc/phân loại qua OpenRouter · LLM chính qua Responses gateway · web console · triển khai VPS.
+- **Repo này:** FastAPI · SQLite · Decision lọc/phân loại qua OpenRouter · LLM chính qua OpenAI Responses API · web console · triển khai VPS.
 - **App điện thoại (Expo):** iOS https://github.com/muoibuon/mstudent-ios · Android https://github.com/muoibuon/mstudent-android
 
 ## Chạy trong 3 phút
@@ -17,8 +17,8 @@ python run_local.py             # in ra địa chỉ LAN, vd. http://192.168.1.5
 
 Web console (trace từng agent, sửa prompt, chạy eval): http://localhost:8000
 
-LLM chính dùng `OPENAI_BASE_URL` và `OPENAI_MODEL`; mặc định là gateway đã cấu hình và
-`cx/gpt-6-luna(xhigh)`. Model lưu trước đó trong cấu hình admin có thể ghi đè mặc định môi trường.
+LLM chính mặc định dùng OpenAI Platform `https://api.openai.com/v1`, model `gpt-6-luna`, reasoning effort `high`
+(`OPENAI_REASONING_EFFORT`). Model lưu trước đó trong cấu hình admin có thể ghi đè mặc định môi trường.
 Decision dùng `google/gemini-decision-1` qua OpenRouter, một request hỏi độ liên quan và nhóm nội dung.
 Tin nhiễu dừng; tin rõ đi Extractor; tin mơ hồ đi Review (xem lại và trích việc trong một lượt LLM chính).
 Tắt bằng `MSTUDENT_DECISION_ENABLED=0` để dùng đường Triage → Extractor cũ. Xem [vận hành Decision](docs/DECISION_ROUTING.md).

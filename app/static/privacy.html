@@ -49,10 +49,9 @@ việc. Trang này nói rõ ứng dụng đọc dữ liệu gì, dùng vào vi�
   <li><strong>OpenRouter và Google:</strong> nội dung thông báo hoặc tài liệu được gửi qua OpenRouter tới
       Google Gemini Decision để đánh giá độ liên quan và phân loại. Tin chưa chắc chắn được chuyển cho mô hình chính
       xem lại; bộ lọc có thể sai và không bảo đảm phát hiện mọi thông báo quan trọng.</li>
-  <li><strong>Gateway mô hình chính do đơn vị vận hành cấu hình:</strong> nội dung cần trích việc, tài liệu cần tóm tắt,
-      dữ liệu cần thiết về việc/hồ sơ học tập và câu hỏi của bạn được gửi tới gateway này để xử lý. Gateway có thể
-      chuyển tiếp tới nhà cung cấp mô hình phía sau; tên model cấu hình không tự xác nhận danh tính nhà cung cấp đó.
-      Đơn vị vận hành cần thông báo nơi xử lý dữ liệu thực tế trước khi bạn dùng dịch vụ.</li>
+  <li><strong>OpenAI Platform API:</strong> nội dung cần trích việc, tài liệu cần tóm tắt, dữ liệu cần thiết về
+      việc/hồ sơ học tập và câu hỏi của bạn được gửi trực tiếp tới OpenAI để xử lý bằng mô hình chính.
+      Nếu đơn vị vận hành thay endpoint sang gateway khác, cần thông báo nhà cung cấp thực tế trước khi sử dụng.</li>
   <li>Khóa API và mã cấp quyền Google không được đưa vào nội dung gửi cho mô hình. Khi AI không khả dụng, ứng dụng
       có thể xử lý bằng bộ luật ngay trên máy chủ và ghi rõ là "offline". MStudent không bật chức năng xuất trace
       của SDK AI sang dịch vụ theo dõi bên ngoài.</li>
