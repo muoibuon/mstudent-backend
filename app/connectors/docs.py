@@ -12,6 +12,7 @@ import io
 import re
 import zipfile
 from dataclasses import dataclass
+from itertools import islice
 from xml.etree import ElementTree
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -157,11 +158,22 @@ def _xlsx(data: bytes) -> str:
 
 
 def _plain(data: bytes, csv_mode: bool) -> str:
-    text = data.decode("utf-8-sig", "replace")
+    # File xuất từ iOS/Excel có thể dùng CR đơn thay vì LF; csv.reader cần xuống dòng chuẩn.
+    text = data.decode("utf-8-sig", "replace").replace("\r\n", "\n").replace("\r", "\n")
     if not csv_mode:
         return text
     csv.field_size_limit(MAX_FILE_BYTES)
-    rows = list(csv.reader(io.StringIO(text)))[:2000]
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        header = text.split("\n", 1)[0]
+        delimiter = max((",", "\t", ";"), key=header.count)
+    try:
+        rows = list(islice(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter), 2000))
+    except csv.Error:
+        # CSV không chuẩn vẫn có thể cung cấp chữ hữu ích cho người dùng.
+        return "\n".join(line.replace("\t", " | ") for line in text.splitlines()[:2000])
     return "\n".join(" | ".join(c.strip() for c in r) for r in rows if any(r))
 
 

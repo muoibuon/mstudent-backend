@@ -90,6 +90,14 @@ def test_chat_file_rejects_unsupported_and_oversized(client, user):
     assert too_big.status_code == 400 and "5 MB" in too_big.json()["detail"]
 
 
+def test_chat_file_accepts_iphone_tab_separated_csv(client, user):
+    h, _ = user
+    data = 'Môn\tNgày\tViệc\rOOP\t20/11\t"Nộp bài"\r'.encode()
+    response = client.post("/api/chat/file", files={"file": ("lich-tuan.csv", data, "text/csv")}, headers=h)
+    assert response.status_code == 200, response.text
+    assert "OOP | 20/11 | Nộp bài" in response.json()["document_context"]
+
+
 def test_patch_recomputes_reminders(client, user):
     h, _ = user
     client.post("/api/demo/seed", headers=h)
