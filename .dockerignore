@@ -1,0 +1,16 @@
+*
+!Dockerfile
+!requirements.txt
+!app/
+!app/**
+!eval/
+!eval/**
+!sample_data/
+!sample_data/**
+!deploy/
+!deploy/backup.py
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.secret_key
+**/*.db*

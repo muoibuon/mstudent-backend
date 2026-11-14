@@ -40,17 +40,21 @@ python -m eval.run_decision_eval --mode decision --split acceptance # gọi API 
 3. **Đổi API** (`app/models.py`, `app/routers/`): ghi rõ trong PR và mở PR kèm ở **cả hai** repo app (iOS và Android) (`lib/types.ts`, `lib/api.ts`).
 4. Không commit `.env`, `.secret_key`, `*.db`, khoá API. Quy tắc đầy đủ: [`AGENTS.md`](AGENTS.md).
 
-## Triển khai (VPS Ubuntu)
+## Triển khai chính: Docker trên VPS Ubuntu
 
 ```bash
-rsync -az --delete --exclude .git --exclude .venv --exclude __pycache__ --exclude '*.db*' --exclude .env \
-  --exclude .secret_key ./ <user>@<máy-chủ>:~/mstudent/backend/
-ssh <user>@<máy-chủ> 'cd ~/mstudent && sudo bash backend/deploy/install.sh'
+# Trên VPS đã có Docker Engine + Compose plugin, trong checkout đúng commit master:
+sudo bash deploy/install.sh
 ```
 
 Điền khóa trong môi trường backend (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`), kiểm tra base URL/model rồi khởi động
-lại dịch vụ theo quy trình triển khai. Không đưa khóa vào lệnh, repo hay app. Google OAuth cho Gmail/Classroom dùng
+lại container theo quy trình triển khai. Không đưa khóa vào lệnh, repo hay app. Google OAuth cho Gmail/Classroom dùng
 cấu hình riêng; khóa AI không cấp quyền đọc hộp thư.
+
+Container chạy non-root, root filesystem chỉ đọc, DB bind mount từ `/opt/mstudent/data`, chỉ nghe
+`127.0.0.1:8000` qua host network để giữ Tailscale Funnel. Khóa ở `/etc/mstudent.env`, không đưa vào image.
+Script build image theo Git revision, backup DB trước chuyển và tự quay lại service/container cũ nếu health lỗi.
+Backup hằng ngày dùng Docker; systemd giữ timer backup. Xem [`docs/DOCKER_DEPLOY.md`](docs/DOCKER_DEPLOY.md).
 
 ## Tài liệu
 

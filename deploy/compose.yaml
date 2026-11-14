@@ -1,0 +1,36 @@
+services:
+  backend:
+    image: ${MSTUDENT_IMAGE:?Set an immutable image tag}
+    build:
+      context: ..
+      args:
+        VCS_REF: ${MSTUDENT_REVISION:-unknown}
+    user: "${MSTUDENT_UID:-1000}:${MSTUDENT_GID:-1000}"
+    # Preserve the localhost Funnel/proxy boundary on the Linux VPS.
+    network_mode: host
+    env_file:
+      - ${MSTUDENT_ENV_FILE:-/etc/mstudent.env}
+    environment:
+      MSTUDENT_DB: /data/mstudent.db
+      HOME: /tmp
+    volumes:
+      - type: bind
+        source: ${MSTUDENT_DATA_DIR:-/opt/mstudent/data}
+        target: /data
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

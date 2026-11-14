@@ -28,6 +28,10 @@ MSTUDENT_OFFLINE=1 python -m eval.run_eval # baseline luật;  bỏ biến để
 
 ## Cấu trúc
 
+Production dùng Docker/Compose làm đường chính (`Dockerfile`, `deploy/compose.yaml`, `deploy/install.sh`). Giữ DB
+host và `MSTUDENT_SECRET_KEY` qua mọi lần deploy; không đưa env thật vào image. `deploy/mstudent.service` là đường
+legacy/rollback, không bật song song với container trên cổng 8000. Xem `docs/DOCKER_DEPLOY.md` trước khi deploy.
+
 ```
 app/
   main.py               lắp app, middleware bảo mật, /api/health, /api/public-config
