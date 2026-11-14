@@ -153,7 +153,10 @@ def get_agent_config(user: dict = Depends(current_user)):
 @router.put("/agents/config")
 def put_agent_config(values: dict[str, str], request: Request, admin: dict = Depends(admin_user)):
     repo.audit("agent_config_changed", admin["id"], client_ip(request), ",".join(sorted(values)[:10]))
-    return {"config": agent_config.save(values)}
+    try:
+        return {"config": agent_config.save(values)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
 
 
 @router.post("/agents/config/reset")

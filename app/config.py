@@ -69,11 +69,6 @@ def decision_enabled() -> bool:
     return bool(gemini_api_key()) and not is_offline_forced()
 
 
-def decision_min_relevant() -> float:
-    """Xác suất tối thiểu để coi một thông báo là đáng chú ý (thấp hơn = ít bỏ sót, nhiều nhiễu hơn)."""
-    return _float_env("MSTUDENT_DECISION_MIN_RELEVANT", 0.5)
-
-
 def decision_timeout_s() -> float:
     return _float_env("MSTUDENT_DECISION_TIMEOUT_S", 8.0)
 

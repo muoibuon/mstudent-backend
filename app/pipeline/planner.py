@@ -46,8 +46,8 @@ def sanitize(drafts: list[TaskOut], max_tasks: int = 5) -> list[TaskOut]:
 
 def priority(task: TaskOut | Task, ref: datetime) -> Priority:
     due = _dt(task.due_at)
-    if due is None:
-        return Priority.low
+    if due is None:  # việc không có hạn: giữ mức đã lưu (004: có thể lấy từ AI quyết định), mặc định thấp
+        return getattr(task, "priority", None) or Priority.low
     hours = (due - ref).total_seconds() / 3600
     if hours <= 48 or task.category == Category.exam:
         return Priority.high

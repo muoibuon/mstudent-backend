@@ -73,20 +73,15 @@ async def run_llm(agent: Agent, payload, *, user_id: int | None, **kwargs):
 
 
 async def llm_triage(msg: Message, user_id: int | None = None) -> TriageOut:
-    # Bước lọc: Gemini Decision (model quyết định tập đóng). Lỗi / chưa cấu hình → model trả lời làm bước này.
-    if config.decision_enabled():
-        from . import decision
-
-        try:
-            return await decision.decide_triage(msg, user_id)
-        except Exception as e:
-            log.warning("Gemini Decision lỗi, lọc bằng model trả lời: %s", type(e).__name__)
+    """Lọc bằng AI trả lời (GPT). Dùng ở tuyến "xem lại" / "luồng cũ"; AI quyết định do orchestrator gọi (004)."""
     res = await run_llm(_agent("Triage", "triage_prompt", TriageOut), render(msg), user_id=user_id)
     return res.final_output
 
 
-async def llm_extract(msg: Message, user_id: int | None = None) -> ExtractionOut:
-    res = await run_llm(_agent("Extractor", "extract_prompt", ExtractionOut), render(msg), user_id=user_id)
+async def llm_extract(msg: Message, user_id: int | None = None, hint: str | None = None) -> ExtractionOut:
+    """`hint`: ngữ cảnh do HỆ THỐNG viết (từ AI quyết định), đặt sau thẻ <thong_bao> — không phải nội dung thông báo."""
+    payload = render(msg) + (f"\n{hint}" if hint else "")
+    res = await run_llm(_agent("Extractor", "extract_prompt", ExtractionOut), payload, user_id=user_id)
     return res.final_output
 
 

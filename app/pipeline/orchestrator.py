@@ -12,9 +12,9 @@ import time
 from collections import defaultdict
 from datetime import datetime
 
-from .. import budget, config, repo
-from ..models import Category, IngestResult, Message, Priority, Source, Task
-from . import planner, rules
+from .. import agent_config, budget, config, repo
+from ..models import Category, ExtractionOut, IngestResult, Message, Priority, Source, Task, TriageOut
+from . import decision, planner, rules
 
 log = logging.getLogger("mstudent")
 WEEKDAY_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật"]
@@ -47,6 +47,61 @@ def _short_error(e: Exception) -> str:
     return f"{type(e).__name__}: {str(e)[:160]}"
 
 
+async def classify(
+    user_id: int | None, msg: Message, tr: Tracer
+) -> tuple[TriageOut, ExtractionOut | None, str, decision.DecisionResult | None]:
+    """Lọc + trích theo 4 tuyến (004). Dùng chung cho ingest và eval; không ghi CSDL ngoài chi phí AI.
+
+    stop: AI quyết định chắc là nhiễu → dừng, không gọi GPT · direct: chắc là cần chú ý → chỉ Extractor (kèm ngữ cảnh) ·
+    review: lưng chừng → GPT Triage quyết định · fallback: AI quyết định lỗi / tắt → GPT Triage → Extractor như cũ.
+    GPT lỗi ở bất kỳ đâu → bộ luật (mode="offline").
+    """
+    mode, tri, ext, dres = "offline", None, None, None
+    if budget.llm_allowed(user_id):
+        from . import llm_agents
+
+        th = agent_config.thresholds()
+        route, why = "fallback", ""
+        if decision.enabled(user_id):
+            t0 = time.perf_counter()
+            try:
+                dres = await decision.decide(msg, user_id)
+                route, why = decision.route(dres, th)
+                tr.add("Decision", "gemini", t0, {"route": route, "reason": why, **dres.summary()})
+            except Exception as e:  # lỗi / bị chặn / trả lời không hợp lệ → luồng cũ cho đúng tin này
+                log.warning("AI quyết định lỗi, dùng luồng cũ: %s", type(e).__name__)
+                tr.add("Decision", "gemini", t0, {"route": "fallback"}, error=f"{_short_error(e)} → luồng cũ")
+                dres = None
+        t0 = time.perf_counter()
+        try:
+            if route in ("stop", "direct"):
+                tri = TriageOut(
+                    relevant=route == "direct", category=dres.category, reason=f"Gemini Decision: {why}"
+                )
+            else:
+                tri = await llm_agents.llm_triage(msg, user_id)
+                tr.add("Triage", "llm", t0, tri)
+            if tri.relevant:
+                t0 = time.perf_counter()
+                hint = decision.extract_hint(dres, th["min_conf"]) if route == "direct" else None
+                ext = await llm_agents.llm_extract(msg, user_id, hint)
+                tr.add("Extractor", "llm", t0, ext)
+            mode = "llm"
+        except Exception as e:  # mạng/credit/model lỗi → không làm hỏng luồng
+            log.warning("LLM lỗi, chuyển sang offline: %s", e)
+            tr.add("LLM", "llm", t0, error=f"{_short_error(e)} → chuyển sang luật")
+            tri = ext = None
+    if tri is None:
+        t0 = time.perf_counter()
+        tri = rules.triage(msg)
+        tr.add("Triage", "rules", t0, tri)
+        if tri.relevant:
+            t0 = time.perf_counter()
+            ext = rules.extract(msg, tri.category)
+            tr.add("Extractor", "rules", t0, ext)
+    return tri, ext, mode, dres
+
+
 async def ingest(user_id: int, msg: Message) -> IngestResult:
     received = msg.received_at or config.now().isoformat()
     msg = msg.model_copy(update={"received_at": received})
@@ -64,32 +119,7 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
         )
 
     tr = Tracer()
-    mode = "offline"
-    tri = ext = None
-    if budget.llm_allowed(user_id):
-        from . import llm_agents
-
-        t0 = time.perf_counter()
-        try:
-            tri = await llm_agents.llm_triage(msg, user_id)
-            tr.add("Triage", "llm", t0, tri)
-            if tri.relevant:
-                t0 = time.perf_counter()
-                ext = await llm_agents.llm_extract(msg, user_id)
-                tr.add("Extractor", "llm", t0, ext)
-            mode = "llm"
-        except Exception as e:  # mạng/credit/model lỗi → không làm hỏng luồng
-            log.warning("LLM lỗi, chuyển sang offline: %s", e)
-            tr.add("LLM", "llm", t0, error=f"{_short_error(e)} → chuyển sang luật")
-            tri = ext = None
-    if tri is None:
-        t0 = time.perf_counter()
-        tri = rules.triage(msg)
-        tr.add("Triage", "rules", t0, tri)
-        if tri.relevant:
-            t0 = time.perf_counter()
-            ext = rules.extract(msg, tri.category)
-            tr.add("Extractor", "rules", t0, ext)
+    tri, ext, mode, dres = await classify(user_id, msg, tr)
 
     repo.save_message(user_id, msg, tri.relevant, tri.category, tri.reason[:300])
     created: list[Task] = []
@@ -109,6 +139,17 @@ async def ingest(user_id: int, msg: Message) -> IngestResult:
         created, updated = planner.plan(
             user_id, ext.tasks, source=msg.source.value, message_id=msg.id, ref=ref
         )
+        # 004: việc không có hạn lấy mức gấp từ AI quyết định (việc có hạn vẫn tính theo hạn).
+        pri = (
+            decision.urgency_priority(dres, agent_config.thresholds()["min_conf"]) if mode == "llm" else None
+        )
+        if pri:
+            created = [
+                (repo.update_task(user_id, t.id, {"priority": pri}) or t)
+                if not t.due_at and t.priority != pri
+                else t
+                for t in created
+            ]
         tr.add(
             "Planner",
             "python",
@@ -194,8 +235,6 @@ async def digest(user_id: int) -> dict:
 
 async def ai_selfcheck(user_id: int | None = None) -> dict:
     """Gọi thật một lượt Triage để biết AI có chạy trực tiếp được không (dùng trước giờ demo)."""
-    from .. import agent_config
-
     model = agent_config.get()["model"]
     if not config.llm_enabled():
         why = "MSTUDENT_OFFLINE=1" if config.is_offline_forced() else "chưa có OPENAI_API_KEY trên server"
@@ -226,7 +265,7 @@ async def ai_selfcheck(user_id: int | None = None) -> dict:
         tri = await llm_agents.llm_triage(sample, user_id)
     except Exception as e:
         return {"ok": False, "mode": "llm", "model": model, "error": _short_error(e)}
-    return {
+    out = {
         "ok": bool(tri.relevant),
         "mode": "llm",
         "model": model,
@@ -234,3 +273,13 @@ async def ai_selfcheck(user_id: int | None = None) -> dict:
         "latency_ms": round((time.perf_counter() - t0) * 1000),
         "sample": tri.model_dump(mode="json"),
     }
+    if decision.enabled(user_id):  # 004: thử luôn AI quyết định và tuyến nó chọn cho tin mẫu
+        t0 = time.perf_counter()
+        try:
+            dres = await decision.decide(sample, user_id)
+            route, why = decision.route(dres, agent_config.thresholds())
+            out["decision"] = {"ok": route == "direct", "route": route, "reason": why,
+                               "latency_ms": round((time.perf_counter() - t0) * 1000)}  # fmt: skip
+        except Exception as e:
+            out["decision"] = {"ok": False, "route": "fallback", "error": _short_error(e)}
+    return out

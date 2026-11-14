@@ -97,7 +97,7 @@ def test_gemini_filters_then_answer_model_extracts(client, user, two_models, cap
         r = client.post("/api/ingest", json=NOTICE, headers=h)
     out = r.json()
     assert r.status_code == 200 and out["mode"] == "llm" and out["relevant"] and out["category"] == "deadline"
-    assert out["reason"] == "Gemini Decision: cần chú ý (97%), loại hạn nộp"
+    assert out["reason"] == "Gemini Decision: cần chú ý (97%, tin cậy 97%), loại hạn nộp"
     assert openai == ["Extractor"]  # bước lọc không gọi model trả lời
     (req,) = gemini
     body = json.loads(req.content)
@@ -107,7 +107,7 @@ def test_gemini_filters_then_answer_model_extracts(client, user, two_models, cap
     assert set(body["questions"]["category"]["criteria"]) == {c.value for c in Category}
     # Chi phí: model lọc tính riêng 0.10 USD / 1M token đầu vào, không có đầu ra.
     agent, tin, tout, cost = _usage()[0]
-    assert (agent, tin, tout) == ("Triage (Gemini Decision)", 400, 0) and cost == pytest.approx(0.00004)
+    assert (agent, tin, tout) == ("Decision", 400, 0) and cost == pytest.approx(0.00004)
     # Khoá không lọt ra phản hồi hay log.
     assert KEY not in r.text and KEY not in caplog.text
     assert client.get("/api/health").json()["filter_model"] == "gemini-decision-1"
@@ -121,7 +121,7 @@ def test_low_probability_notice_is_filtered_out_without_answer_model(client, use
     h, _ = user
     out = client.post("/api/ingest", json={"body": "Sale 50% trà sữa hôm nay cả nhà ơi"}, headers=h).json()
     assert out["relevant"] is False and out["created"] == [] and out["mode"] == "llm"
-    assert out["reason"].startswith("Gemini Decision: bỏ qua (8%)")
+    assert out["reason"].startswith("Gemini Decision: bỏ qua (8%, tin cậy")
     assert len(gemini) == 1 and openai == []  # tin nhiễu không tốn lượt model trả lời
 
 
@@ -145,7 +145,7 @@ def test_gemini_failure_falls_back_to_answer_model(client, user, two_models, bro
     out = client.post("/api/ingest", json=NOTICE, headers=h).json()
     assert out["mode"] == "llm" and out["reason"] == "GPT lọc" and out["category"] == "exam"
     assert openai == ["Triage", "Extractor"]
-    assert _usage()[0][0] == "Triage (Gemini Decision)"  # lượt lỗi vẫn được ước tính vào chi phí
+    assert _usage()[0][0] == "Decision"  # lượt lỗi vẫn được ước tính vào chi phí
 
 
 def test_without_gemini_key_answer_model_does_triage(client, user, two_models, monkeypatch):
@@ -172,5 +172,5 @@ def test_input_is_capped(two_models):
     from app.models import Message
 
     gemini, _, _ = two_models
-    asyncio.run(decision.decide_triage(Message(body="x" * 8000, subject="s" * 500, sender="n" * 300), None))
+    asyncio.run(decision.decide(Message(body="x" * 8000, subject="s" * 500, sender="n" * 300), None))
     assert len(json.loads(gemini[0].content)["input"]) <= decision.MAX_INPUT_CHARS
