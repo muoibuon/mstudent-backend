@@ -142,3 +142,9 @@ def test_attendance_pattern_keeps_existing_higher_priority_categories(text, cate
 def test_explicit_date_uses_daypart_without_changing_the_date():
     msg = Message(body="sáng ngày 02/12/2026 tôi học oop", received_at=RECEIVED)
     assert rules.apply_class_time_defaults(msg, [class_task()])[0].due_at == "2026-12-02T08:00:00+07:00"
+
+
+def test_invalid_received_at_does_not_break_main_postprocessing():
+    msg = Message(body="thứ 2 tuần sau sáng tôi học oop", received_at="not-a-date")
+    tasks = [class_task(due_at="2026-11-16T08:00:00+07:00")]
+    assert rules.apply_class_time_defaults(msg, tasks) == tasks

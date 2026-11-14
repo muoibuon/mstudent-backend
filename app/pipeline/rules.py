@@ -212,7 +212,10 @@ def apply_class_time_defaults(msg: Message, tasks: list[TaskOut]) -> list[TaskOu
     )
     if references > 1:
         return tasks
-    day = find_date(text, _received(msg))
+    try:
+        day = find_date(text, _received(msg))
+    except (ValueError, OverflowError):
+        return tasks
     if day is None:
         return tasks
     label, hour = part
