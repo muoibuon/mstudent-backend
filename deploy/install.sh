@@ -8,7 +8,7 @@
 set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "Hãy chạy bằng sudo."; exit 1; }
-SRC="$(cd "$(dirname "$0")/.." && pwd)"          # thư mục  của mã nguồn
+SRC="$(cd "$(dirname "$0")/.." && pwd)"          # thư mục gốc của repo mstudent-backend
 APP=/opt/mstudent
 ENV_FILE=/etc/mstudent.env
 
@@ -23,13 +23,13 @@ install -d -o mstudent -g mstudent -m 700 "$APP/data" /var/backups/mstudent
 
 echo "==> Mã nguồn → $APP/app/backend"
 rsync -a --delete --exclude .venv --exclude __pycache__ --exclude '*.db*' --exclude .env --exclude .secret_key \
-  "$SRC/" "$APP/app/"
+  "$SRC/" "$APP/app/backend/"
 chown -R mstudent:mstudent "$APP/app"
 
 echo "==> Thư viện Python"
 [ -x "$APP/venv/bin/python" ] || sudo -u mstudent python3 -m venv "$APP/venv"
 sudo -u mstudent "$APP/venv/bin/pip" install -q --upgrade pip
-sudo -u mstudent "$APP/venv/bin/pip" install -q -r "$APP/app/requirements.txt"
+sudo -u mstudent "$APP/venv/bin/pip" install -q -r "$APP/app/backend/requirements.txt"
 
 echo "==> Cấu hình"
 if [ ! -f "$ENV_FILE" ]; then
