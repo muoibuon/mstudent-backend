@@ -67,7 +67,8 @@ GOOGLE_IOS_CLIENT_ID=1234-ios.apps.googleusercontent.com
 Khởi động lại `python run_local.py` → dòng "Google Sign-In: bật". App tự lấy client ID từ `/api/public-config`,
 không cần build lại app khi đổi client ID (trừ URL scheme của iOS).
 
-Trên máy chủ production: ghi 3 dòng trên vào `/etc/mstudent.env` rồi `sudo systemctl restart mstudent`. Sau khi người
+Trên máy chủ production: chạy `sudo bash ~/mstudent/backend/deploy/set_google_oauth.sh` (hỏi 3 giá trị, client secret
+nhập ẩn, tự ghi `/etc/mstudent.env` và khởi động lại), hoặc tự ghi 3 dòng trên rồi `sudo systemctl restart mstudent`. Sau khi người
 dùng bấm kết nối Google trong app, nguồn **Gmail** (và **Classroom** nếu đã cấp quyền) tự xuất hiện ở màn hình
 **Nguồn tự động** và máy chủ tự đồng bộ — không cần bấm "Đồng bộ" nữa.
 
