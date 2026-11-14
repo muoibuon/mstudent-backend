@@ -26,7 +26,9 @@ MSTUDENT_OFFLINE=1 python -m eval.run_eval      # baseline bộ luật
 
 ## Quy trình làm việc trong nhóm
 
-1. Tạo nhánh từ `main`: `git checkout -b <việc-ngắn-gọn>` (vd. `fix-gmail-sync`). Không push thẳng vào `main`.
+1. Hai nhánh chính: **`master`** (bản ổn định, đang chạy trên máy chủ) và **`dev`** (bản đang phát triển).
+   Tạo nhánh việc từ `dev`: `git checkout dev && git pull && git checkout -b <việc-ngắn-gọn>` (vd. `fix-gmail-sync`),
+   mở PR vào `dev`. Không push thẳng vào `master`; `dev` → `master` bằng PR khi đã thử xong.
 2. Mỗi PR một việc; test và lint phải xanh; mô tả ngắn: làm gì, test ra sao, chưa kiểm tra được gì.
 3. **Đổi API** (`app/models.py`, `app/routers/`): ghi rõ trong PR và mở PR kèm ở repo app (`lib/types.ts`, `lib/api.ts`).
 4. Không commit `.env`, `.secret_key`, `*.db`, khoá API. Quy tắc đầy đủ: [`AGENTS.md`](AGENTS.md).
