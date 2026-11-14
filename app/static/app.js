@@ -1,4 +1,4 @@
-
+import {traceSummary, formatDuration, stepDescription} from './trace-view.mjs';
 const $ = (id) => document.getElementById(id);
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -121,23 +121,44 @@ async function loadTraces() {
   if (!TRACES.length) { list.replaceChildren(h('div', {class:'meta'}, 'Chưa có lượt chạy nào.')); $('traceDetail').replaceChildren('Chọn một lượt chạy bên trái.'); return; }
   if (!TRACES.some((t) => t.id === SEL)) SEL = TRACES[0].id;
   list.replaceChildren(...TRACES.map((t) => {
-    const decision = t.steps.find((s) => s.agent === 'Decision');
-    const tri = t.steps.find((s) => s.agent === 'Triage' || s.agent === 'Review') || decision;
-    const rel = decision?.output?.route === 'stop' ? false : tri?.output?.relevant;
-    return h('div', {class:'traceItem' + (t.id === SEL ? ' sel' : ''), onclick: () => { SEL = t.id; loadTraces(); }},
-      h('div', {}, t.summary),
-      h('div', {class:'meta'}, h('span', {class:'tag ' + (t.mode === 'llm' ? 'llm' : 'rules')}, t.mode), ' ',
-        rel === false ? '✗ bỏ qua' : '✓ ' + (CAT[tri?.output?.category] || ''), ' · ', decision?.output?.route || '', ' · ', fmtDT(t.created_at)));
+    const info = traceSummary(t);
+    return h('button', {type:'button', class:'traceItem' + (t.id === SEL ? ' sel' : ''), 'data-trace-id':t.id, 'aria-pressed':t.id === SEL, onclick: () => {
+      SEL = t.id;
+      list.querySelectorAll('.traceItem').forEach((button) => {
+        const selected = Number(button.dataset.traceId) === SEL;
+        button.classList.toggle('sel', selected); button.setAttribute('aria-pressed', selected);
+      });
+      showTrace(t);
+    }},
+      h('span', {class:'traceTitle'}, t.summary),
+      h('span', {class:'traceMeta'}, h('span', {class:'traceMode ' + info.key}, info.label),
+        h('span', {}, formatDuration(info.totalMs))),
+      h('span', {class:'traceMeta meta'}, info.routeLabel),
+      h('span', {class:'traceMeta meta'}, fmtDT(t.created_at)));
   }));
   showTrace(TRACES.find((t) => t.id === SEL));
 }
 function showTrace(t) {
-  const total = t.steps.reduce((a, s) => a + s.ms, 0);
+  const info = traceSummary(t);
+  const names = {Decision:'Decision · Lọc nhiễu & phân loại', Extractor:'LLM chính · Trích việc', Review:'LLM chính · Xem lại & trích việc', Triage:'Lọc dự phòng', Planner:'Python · Lập việc', Documents:'Đọc tài liệu', Routing:'Chọn tuyến'};
   $('traceDetail').replaceChildren(
-    h('p', {class:'meta'}, `${t.summary} · tổng ${total.toFixed(1)} ms · message ${t.message_id}`),
+    h('div', {class:'traceOverview'},
+      h('span', {class:'traceMode ' + info.key}, info.label),
+      h('h3', {}, info.routeLabel),
+      h('p', {}, info.description),
+      h('div', {class:'traceFacts'},
+        h('span', {}, `${info.decisionSteps} bước Decision`), h('span', {}, `${info.mainSteps} bước LLM chính`),
+        h('span', {}, `Tổng bước ghi nhận: ${formatDuration(info.totalMs)}`)),
+      info.failedSteps ? h('p', {class:'bad'}, `${info.failedSteps} bước không hoàn tất; tuyến dự phòng được thể hiện bên dưới.`) : null),
+    h('p', {class:'meta'}, t.summary),
     ...t.steps.map((s) => h('div', {class:'step' + (s.error ? ' err' : '')},
-      h('div', {class:'row'}, h('b', {}, s.agent), h('span', {class:'tag ' + s.kind}, s.kind), h('span', {class:'meta'}, s.ms + ' ms')),
-      h('pre', {}, s.error ? s.error : JSON.stringify(s.output, null, 2)))));
+      h('div', {class:'row'}, h('b', {}, names[s.agent] || s.agent),
+        h('span', {class:'tag ' + s.kind}, s.error ? 'Không hoàn tất' : s.kind === 'rules' ? 'Bộ luật' : s.kind === 'python' ? 'Python' : 'AI'),
+        h('span', {class:'meta'}, formatDuration(s.ms))),
+      h('p', {class:'stepExplanation'}, stepDescription(s, CAT)),
+      h('details', {class:'traceTechnical'}, h('summary', {}, s.error ? 'Xem lỗi kỹ thuật' : 'Xem dữ liệu kỹ thuật (JSON)'),
+        h('pre', {}, s.error ? s.error : JSON.stringify(s.output, null, 2))))),
+    h('p', {class:'meta'}, `Message: ${t.message_id}`));
 }
 $('trRefresh').onclick = loadTraces;
 $('trSend').onclick = async () => {
@@ -248,9 +269,10 @@ $('statsRefresh').onclick = loadStats;
 async function loadHealth() {
   const s = await (await fetch('/api/health')).json();
   NOW = new Date(s.now);
-  const filter = s.filter_model && s.filter_model !== s.model ? 'lọc: ' + s.filter_model + ' · trả lời: ' : '';
-  const label = s.mode === 'llm' ? '🟢 LLM · ' + filter + s.model : '🟡 Offline (luật)';
+  const combined = s.filter_model && s.filter_model !== s.model;
+  const label = s.mode === 'llm' ? 'Cấu hình: ' + (combined ? 'Decision + LLM' : 'LLM chính') : 'Cấu hình: Bộ luật (offline)';
   $('modePill').textContent = label; $('modePillLogin').textContent = label;
+  $('modePill').title = $('modePillLogin').title = `Lọc: ${s.filter_model || s.model} · LLM chính: ${s.model}`;
   $('nowPill').textContent = '🕒 ' + fmtDT(s.now);
 }
 $('seedBtn').onclick = async () => {
