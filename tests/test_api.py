@@ -59,6 +59,102 @@ def test_chat_offline_tools(client, user):
     )
 
 
+def test_chat_file_requires_login_and_reads_document(client, user):
+    h, _ = user
+    document = ("Lịch thi học kỳ\nThi Toán lúc 09:00 ngày 20/11 tại phòng B201.\n").encode()
+    files = {"file": ("lich-thi.txt", document, "text/plain")}
+    assert client.post("/api/chat/file", files=files).status_code == 401
+    response = client.post("/api/chat/file", files=files, headers=h)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "offline" and "lich-thi.txt" in body["reply"]
+    assert "20/11" in body["reply"]
+    assert "<thong_bao>" in body["document_context"]
+    assert client.get("/api/tasks", headers=h).json() == [], "đính kèm không tự tạo việc"
+    response = client.post(
+        "/api/chat/file", files=files, data={"message": "Hãy tạo việc từ tài liệu này"}, headers=h
+    )
+    assert response.status_code == 200 and response.json()["tool_calls"][0]["tool"] == "add_notice"
+    assert len(client.get("/api/tasks", headers=h).json()) == 1
+
+
+def test_chat_file_rejects_unsupported_and_oversized(client, user):
+    h, _ = user
+    bad_type = client.post("/api/chat/file", files={"file": ("photo.png", b"x", "image/png")}, headers=h)
+    assert bad_type.status_code == 400
+    too_big = client.post(
+        "/api/chat/file",
+        files={"file": ("notes.txt", b"a" * (5 * 1024 * 1024 + 1), "text/plain")},
+        headers=h,
+    )
+    assert too_big.status_code == 400 and "5 MB" in too_big.json()["detail"]
+
+
+def test_chat_file_accepts_iphone_tab_separated_csv(client, user):
+    h, _ = user
+    data = 'Môn\tNgày\tViệc\rOOP\t20/11\t"Nộp bài"\r'.encode()
+    response = client.post("/api/chat/file", files={"file": ("lich-tuan.csv", data, "text/csv")}, headers=h)
+    assert response.status_code == 200, response.text
+    assert "OOP | 20/11 | Nộp bài" in response.json()["document_context"]
+
+
+def test_chat_file_imports_weekly_csv_without_duplicates_or_cross_user_data(client, user):
+    h, _ = user
+    data = (
+        "Môn\tNgày\tBắt đầu\tKết thúc\tLặp lại\r"
+        "Xác suất - Thống kê\t09/09/2026\t08:00\t11:00\tHàng tuần (Thứ Tư)\r"
+        "Thí nghiệm khoa học\t11/09/2026\t08:00\t11:00\tHàng tuần (Thứ Sáu)\r"
+    ).encode()
+    files = {"file": ("lich-hoc.csv", data, "text/csv")}
+    payload = {"message": "Thêm lịch này vào lịch app"}
+    first = client.post("/api/chat/file", files=files, data=payload, headers=h)
+    assert first.status_code == 200, first.text
+    assert first.json()["mode"] == "offline"
+    assert first.json()["tool_calls"][0]["tool"] == "import_schedule"
+    tasks = client.get("/api/tasks", headers=h).json()
+    assert [t["due_at"][:16] for t in tasks] == ["2026-11-11T08:00", "2026-11-13T08:00"]
+    assert all(t["title"].startswith("Học ") for t in tasks)
+
+    repeat = client.post("/api/chat/file", files=files, data=payload, headers=h)
+    assert repeat.status_code == 200 and "không tạo trùng" in repeat.json()["reply"]
+    assert len(client.get("/api/tasks", headers=h).json()) == 2
+
+    other = auth(signup(client, "student2@vju.ac.vn"))
+    assert client.get("/api/tasks", headers=other).json() == []
+
+
+def test_chat_imports_schedule_from_previous_file_context(client, user):
+    h, _ = user
+    data = b"Mon,Ngay,Bat dau,Ket thuc,Lap lai\nOOP,09/09/2026,08:00,10:00,Hang tuan (Thu Tu)\n"
+    upload = client.post("/api/chat/file", files={"file": ("lich.csv", data, "text/csv")}, headers=h)
+    assert upload.status_code == 200
+    assert client.get("/api/tasks", headers=h).json() == []
+    followup = client.post(
+        "/api/chat",
+        json={
+            "message": "thêm lịch này vào lịch app",
+            "history": [{"role": "user", "content": upload.json()["document_context"]}],
+        },
+        headers=h,
+    )
+    assert followup.status_code == 200, followup.text
+    assert len(client.get("/api/tasks", headers=h).json()) == 1
+
+
+def test_chat_schedule_does_not_reuse_past_one_off_dates(client, user):
+    h, _ = user
+    data = b"Mon,Ngay,Bat dau\nOOP,09/09/2026,08:00\n"
+    response = client.post(
+        "/api/chat/file",
+        files={"file": ("old.csv", data, "text/csv")},
+        data={"message": "Thêm lịch này vào lịch app"},
+        headers=h,
+    )
+    assert response.status_code == 200
+    assert "những ngày đã qua" in response.json()["reply"]
+    assert client.get("/api/tasks", headers=h).json() == []
+
+
 def test_patch_recomputes_reminders(client, user):
     h, _ = user
     client.post("/api/demo/seed", headers=h)
