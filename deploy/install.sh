@@ -17,6 +17,10 @@ IMAGE="mstudent-backend:$REV"
 UID_APP="$(id -u mstudent)"; GID_APP="$(id -g mstudent)"
 BACKUP="$(mktemp -d "$APP/deploy-backups/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")"
 cp -p "$ENV_FILE" "$BACKUP/mstudent.env"
+for name in mstudent-backup.service mstudent-backup.timer; do
+  if [ -f "/etc/systemd/system/$name" ]; then cp -p "/etc/systemd/system/$name" "$BACKUP/$name"; fi
+done
+if [ -f "$APP/docker/backup.sh" ]; then cp -p "$APP/docker/backup.sh" "$BACKUP/backup.sh"; fi
 if [ -f "$APP/docker/release.env" ]; then
   cp -p "$APP/docker/release.env" "$BACKUP/release.env"
   cp -p "$APP/docker/compose.yaml" "$BACKUP/compose.yaml"
@@ -24,10 +28,16 @@ fi
 cp "$SRC/deploy/compose.yaml" "$APP/docker/compose.yaml.new"
 printf 'MSTUDENT_IMAGE=%s\nMSTUDENT_REVISION=%s\nMSTUDENT_UID=%s\nMSTUDENT_GID=%s\nMSTUDENT_ENV_FILE=%s\nMSTUDENT_DATA_DIR=%s\n' \
   "$IMAGE" "$REV" "$UID_APP" "$GID_APP" "$ENV_FILE" "$APP/data" > "$APP/docker/release.env.new"
-docker build --build-arg "VCS_REF=$REV" -t "$IMAGE" "$SRC"
+# A revision tag is immutable, including its resolved dependencies/base image.
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  docker build --build-arg "VCS_REF=$REV" -t "$IMAGE" "$SRC"
+fi
+EXPECTED_IMAGE="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
 
 OLD_SYSTEMD=0
 systemctl is-active --quiet mstudent.service && OLD_SYSTEMD=1
+OLD_ENABLED=0
+systemctl is-enabled --quiet mstudent.service && OLD_ENABLED=1
 OLD_DOCKER=0
 if [ -f "$APP/docker/release.env" ]; then
   [ -n "$(docker compose -p mstudent --env-file "$APP/docker/release.env" -f "$APP/docker/compose.yaml" ps -q backend)" ] && OLD_DOCKER=1
@@ -47,17 +57,23 @@ rollback() {
     elif [ "$OLD_SYSTEMD" -eq 1 ]; then
       systemctl start mstudent.service || true
     fi
+    if [ "$OLD_ENABLED" -eq 1 ]; then systemctl enable mstudent.service || true; fi
+    for name in mstudent-backup.service mstudent-backup.timer; do
+      if [ -f "$BACKUP/$name" ]; then cp -p "$BACKUP/$name" "/etc/systemd/system/$name"; fi
+    done
+    if [ -f "$BACKUP/backup.sh" ]; then cp -p "$BACKUP/backup.sh" "$APP/docker/backup.sh"; fi
+    systemctl daemon-reload || true
   fi
   echo "Deploy lỗi; xem rollback và snapshot tại $BACKUP" >&2
   exit "$code"
 }
 trap rollback ERR
 
+SWITCHED=1
 if [ "$OLD_SYSTEMD" -eq 1 ]; then systemctl stop mstudent.service; fi
 if [ "$OLD_DOCKER" -eq 1 ]; then
   docker compose -p mstudent --env-file "$APP/docker/release.env" -f "$APP/docker/compose.yaml" stop backend
 fi
-SWITCHED=1
 # A consistent final snapshot with all application writers stopped.
 if [ -f "$APP/data/mstudent.db" ]; then
   docker run --rm --read-only --user 0:0 \
@@ -69,7 +85,11 @@ mv "$APP/docker/release.env.new" "$APP/docker/release.env"
 docker compose -p mstudent --env-file "$APP/docker/release.env" -f "$APP/docker/compose.yaml" up -d --no-build
 healthy=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 5 http://127.0.0.1:8000/api/health >/dev/null; then healthy=1; break; fi
+  cid="$(docker compose -p mstudent --env-file "$APP/docker/release.env" -f "$APP/docker/compose.yaml" ps -q backend)"
+  state="$(docker inspect --format '{{.State.Status}} {{.State.Health.Status}} {{.Image}}' "$cid" 2>/dev/null || true)"
+  if [ "$state" = "running healthy $EXPECTED_IMAGE" ] && curl -fsS --max-time 5 http://127.0.0.1:8000/api/health >/dev/null; then
+    healthy=1; break
+  fi
   sleep 2
 done
 [ "$healthy" -eq 1 ]
