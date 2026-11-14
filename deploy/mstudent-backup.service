@@ -4,11 +4,6 @@ Description=MStudent database backup
 
 [Service]
 Type=oneshot
-User=mstudent
-Group=mstudent
-ExecStart=/opt/mstudent/venv/bin/python /opt/mstudent/app/backend/deploy/backup.py /opt/mstudent/data/mstudent.db /var/backups/mstudent 7
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/backups/mstudent /opt/mstudent/data
+User=root
+ExecStart=/bin/bash /opt/mstudent/docker/backup.sh
 UMask=0077

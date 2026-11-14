@@ -178,8 +178,12 @@ refresh token Google. Lịch LMS tự đồng bộ không qua AI; endpoint nhậ
 
 ## 8. Chạy và triển khai
 
-Theo yêu cầu, backend chạy **localhost**: `python run_local.py` mở cổng 8000 trên mọi card mạng và in địa chỉ LAN để nhập
-vào app. Chi tiết mạng, build app và kịch bản: `docs/DEMO_RUNBOOK.md`. Bảo mật: `docs/SECURITY.md`.
+Production chạy Docker/Compose, Uvicorn chỉ bind `127.0.0.1:8000` trong host network Linux và phục vụ ra ngoài qua
+Tailscale Funnel. DB bind mount `/opt/mstudent/data` vào `/data`; UID/GID container khớp user dịch vụ. Root filesystem
+chỉ đọc; cấu hình/khóa từ env file trên host. Backup timer gọi container riêng, không cần khóa API hoặc network.
+Quy trình build, chuyển từ systemd và rollback: `docs/DOCKER_DEPLOY.md`.
+
+Local demo vẫn có thể dùng `python run_local.py`, mở cổng 8000 trên mạng LAN. Chi tiết demo: `docs/DEMO_RUNBOOK.md`.
 
 ## 9. Chưa làm
 
