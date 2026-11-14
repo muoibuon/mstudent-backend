@@ -60,6 +60,8 @@
 
   <!-- ===== Trace ===== -->
   <section id="tab-trace" class="hidden">
+    <p class="notice">Mỗi dòng là trace của một thông báo. Chế độ bên dưới dựa trên các bước thực tế đã ghi nhận;
+      không bao gồm toàn bộ lượt chat hoặc bản tin. Số bước không phải số request API.</p>
     <div class="card">
       <h2>Gửi thông báo vào pipeline</h2>
       <div class="row">
@@ -70,7 +72,7 @@
     </div>
     <div class="gridTrace" style="margin-top:16px">
       <div class="card"><h2>Lượt chạy gần đây <span class="grow"></span><button class="ghost sm" id="trRefresh">Làm mới</button></h2><div id="traceList"></div></div>
-      <div class="card"><h2>Chi tiết từng bước</h2><div id="traceDetail" class="meta">Chọn một lượt chạy bên trái.</div></div>
+      <div class="card"><h2>Luồng xử lý thực tế</h2><div id="traceDetail" aria-live="polite"><p class="meta">Chọn một lượt chạy bên trái.</p></div></div>
     </div>
   </section>
 
@@ -123,6 +125,6 @@
   </section>
 </main>
 </div>
-<script src="/static/app.js"></script>
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>

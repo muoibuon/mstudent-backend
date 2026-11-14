@@ -57,6 +57,25 @@ Thông báo, tài liệu, lịch sử chat và tool output là dữ liệu khôn
 GUARD, sanitize, giới hạn đầu vào và kiểm tra `user_id` vẫn áp dụng. Nội dung hữu hạn không làm model miễn nhiễm với
 prompt injection hoặc phân loại sai.
 
+## Đọc Agent trace trên web console
+
+Nhãn mỗi trace dựa trên các bước đã ghi nhận, tách khỏi trạng thái cấu hình ở header:
+
+- **Decision + LLM**: có quyết định hợp lệ và bước main LLM hoàn tất.
+- **Chỉ Decision**: dừng sau lọc nhiễu, không có bước main.
+- **Chỉ LLM**: gate tắt/chưa cấu hình, main xử lý.
+- **Decision lỗi → LLM**: Decision không dùng được, main chạy dự phòng.
+- **Bộ luật / Bộ luật dự phòng**: kết quả cuối bằng luật, kể cả đã thử AI trước đó.
+- **AI · trace cũ**: trace không có bước Decision riêng; không suy đoán chế độ kết hợp từ `mode=llm`.
+
+Mỗi trace có tóm tắt tuyến, số bước Decision/main, thời gian và giải thích từng bước. JSON/lỗi kỹ thuật nằm trong mục
+mở rộng. Tổng thời gian là tổng bước được ghi nhận, không phải toàn bộ chat; số bước không phải số HTTP request.
+Trace thông báo không bao gồm Assistant bên ngoài hoặc lượt Digest riêng. Kiểm tra logic UI bằng:
+
+```bash
+node --test tests/test_trace_view.mjs
+```
+
 ## Email và tài liệu
 
 Body email và từng tài liệu có gate riêng. Không bỏ attachment hợp lệ chỉ vì body bị coi là nhiễu. Giữ giới hạn
