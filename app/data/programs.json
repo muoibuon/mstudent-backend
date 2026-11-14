@@ -1,0 +1,90 @@
+{
+ "source": "Trang chính thức của trường (vju.ac.vn: Đào tạo → Đại học / Sau đại học / Tiến sĩ)",
+ "fetched": "2026-11-14",
+ "schools": {
+  "VNU-VJU": {
+   "dai_hoc": [
+    {
+     "code": "BJS",
+     "name": "Nhật Bản học"
+    },
+    {
+     "code": "BCSE",
+     "name": "Khoa học và Kỹ thuật máy tính"
+    },
+    {
+     "code": "ECE",
+     "name": "Kỹ thuật xây dựng"
+    },
+    {
+     "code": "EMJM",
+     "name": "Cơ điện tử thông minh và sản xuất theo phương thức Nhật Bản"
+    },
+    {
+     "code": "ESAS",
+     "name": "Nông nghiệp thông minh và bền vững"
+    },
+    {
+     "code": "EFTH",
+     "name": "Công nghệ thực phẩm và sức khỏe"
+    },
+    {
+     "code": "BGDI",
+     "name": "Đổi mới và phát triển toàn cầu"
+    },
+    {
+     "code": "ESCT",
+     "name": "Công nghệ kỹ thuật chip bán dẫn"
+    },
+    {
+     "code": "BICA",
+     "name": "Điều khiển thông minh và tự động hóa"
+    }
+   ],
+   "thac_si": [
+    {
+     "code": "MCCD",
+     "name": "Biến đổi khí hậu và phát triển"
+    },
+    {
+     "code": "MBA",
+     "name": "Quản trị kinh doanh"
+    },
+    {
+     "code": "MPP",
+     "name": "Chính sách công"
+    },
+    {
+     "code": "MGL",
+     "name": "Lãnh đạo toàn cầu"
+    },
+    {
+     "code": "MAS",
+     "name": "Khu vực học"
+    },
+    {
+     "code": "MEE",
+     "name": "Kỹ thuật môi trường"
+    },
+    {
+     "code": "MCE",
+     "name": "Kỹ thuật xây dựng"
+    },
+    {
+     "code": "MNT",
+     "name": "Công nghệ nano"
+    },
+    {
+     "code": "MCSE",
+     "name": "Khoa học và Kỹ thuật máy tính"
+    }
+   ],
+   "tien_si": [
+    {
+     "code": "DJS",
+     "name": "Nhật Bản học"
+    }
+   ]
+  }
+ }
+}
