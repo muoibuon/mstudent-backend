@@ -40,6 +40,7 @@ def gateway(monkeypatch):
     """Runner/Responses thật, HTTP giả; mọi host ngoài gateway làm test thất bại."""
     monkeypatch.setenv("OPENAI_API_KEY", "gateway-test-not-real")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.test/v1")
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "high")
     model = "cx/gpt-6-luna(xhigh)"
     monkeypatch.setattr(agent_config, "get", lambda: agent_config.DEFAULTS | {"model": model})
     calls = []
@@ -50,6 +51,7 @@ def gateway(monkeypatch):
         assert request.headers["authorization"] == "Bearer gateway-test-not-real"
         body = json.loads(request.content)
         assert body["model"] == model
+        assert body["reasoning"]["effort"] == "high"
         calls.append(body)
         return httpx.Response(200, json=_response(reply["text"], model))
 
@@ -120,3 +122,15 @@ def test_review_schema_requires_all_fields():
 
     with pytest.raises(ValidationError):
         llm_agents.ReviewOut(relevant=True, category="other", reason="Hữu ích")
+
+
+def test_official_openai_defaults_and_effort_validation(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_REASONING_EFFORT", raising=False)
+    assert config.openai_base_url() == "https://api.openai.com/v1"
+    assert config.openai_reasoning_effort() == "high"
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "xhigh")
+    assert config.openai_reasoning_effort() == "xhigh"
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "invalid")
+    with pytest.raises(ValueError):
+        config.openai_reasoning_effort()

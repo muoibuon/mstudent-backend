@@ -31,7 +31,7 @@ TZ = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
 
 DB_PATH = os.getenv("MSTUDENT_DB", str(BACKEND_DIR / "mstudent.db"))
 # Hai model: model TRẢ LỜI (trích việc, chi tiết sự kiện, bản tin, trợ lý chat…) và model LỌC (Triage, xem decision.py).
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "cx/gpt-6-luna(xhigh)")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 
 ACCESS_TTL_MIN = int(os.getenv("MSTUDENT_ACCESS_TTL_MIN", "15"))
 REFRESH_TTL_DAYS = int(os.getenv("MSTUDENT_REFRESH_TTL_DAYS", "30"))
@@ -61,7 +61,14 @@ def openai_api_key() -> str:
 
 
 def openai_base_url() -> str:
-    return os.getenv("OPENAI_BASE_URL", "https://rs6esw8.abc-tunnel.us/v1").rstrip("/")
+    return os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+
+def openai_reasoning_effort() -> str:
+    effort = os.getenv("OPENAI_REASONING_EFFORT", "high")
+    if effort not in {"none", "low", "medium", "high", "xhigh", "max"}:
+        raise ValueError("OPENAI_REASONING_EFFORT không hợp lệ")
+    return effort
 
 
 def openrouter_api_key() -> str:
@@ -276,6 +283,10 @@ def check_prod_config() -> None:
         problems.append("OPENAI_API_KEY (hoặc đặt MSTUDENT_OFFLINE=1 để chạy bộ luật, không dùng AI)")
     if not admin_emails():
         problems.append("MSTUDENT_ADMIN_EMAILS")
+    try:
+        openai_reasoning_effort()
+    except ValueError:
+        problems.append("OPENAI_REASONING_EFFORT")
     if os.getenv("MSTUDENT_NOW"):
         problems.append("MSTUDENT_NOW (phải bỏ trống ở prod, nếu không trần chi phí không sang ngày mới)")
     if problems:

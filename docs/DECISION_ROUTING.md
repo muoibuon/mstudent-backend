@@ -10,8 +10,9 @@ Chép `.env.example` cho local hoặc `deploy/mstudent.env.example` cho dịch v
 
 ```dotenv
 OPENAI_API_KEY=
-OPENAI_BASE_URL=https://rs6esw8.abc-tunnel.us/v1
-OPENAI_MODEL=cx/gpt-6-luna(xhigh)
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-6-luna
+OPENAI_REASONING_EFFORT=high
 OPENROUTER_API_KEY=
 MSTUDENT_DECISION_MODEL=google/gemini-decision-1
 MSTUDENT_DECISION_ENABLED=1
@@ -23,8 +24,9 @@ không thay thế hai khóa model này. Sheets/Docs/Slides hiện đọc link c�
 
 Decision dùng `POST https://openrouter.ai/api/alpha/decisions`, auth Bearer, payload `state`. Usage đọc
 `input_tokens`, `output_tokens`, `cost`. Main agents và Assistant đều dùng custom Responses client; model lưu trong
-settings admin có thể ghi đè `OPENAI_MODEL`. Giữ nguyên alias có `(xhigh)` theo gateway; không tự tách thành tham số khác.
-SDK tracing bên ngoài bị tắt. Model alias và request thành công không tự xác nhận model upstream thực tế.
+settings admin có thể ghi đè `OPENAI_MODEL`. Mặc định dùng API OpenAI chính thức với model `gpt-6-luna` và truyền
+`reasoning.effort=high` riêng, không gắn effort vào tên model. SDK tracing bên ngoài bị tắt. Khi tự cấu hình gateway
+khác, phải kiểm tra lại model/effort và nhà cung cấp nhận dữ liệu.
 
 ## Bốn tuyến
 
